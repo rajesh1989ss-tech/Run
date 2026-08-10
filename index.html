@@ -1,0 +1,2357 @@
+<!doctype html>
+<html lang="en" data-theme="amoled">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" id="metaThemeColor" content="#000000">
+<title>Sprint Repeat Log</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="icons/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Sprints">
+<meta name="description" content="Offline repeat-sprint interval log: fixed-effort repeats, timed recovery, fade tracking and printable A4 reports.">
+<script>
+/* Apply theme before first paint — avoids a white flash on AMOLED. */
+(function(){
+  try{
+    var t = localStorage.getItem('sprintlog.theme') || 'amoled';
+    document.documentElement.dataset.theme = t;
+    var c = {light:'#ffffff', amoled:'#000000', dim:'#121212', hc:'#000000'}[t] || '#000000';
+    var m = document.getElementById('metaThemeColor');
+    if(m) m.setAttribute('content', c);
+  }catch(e){ document.documentElement.dataset.theme = 'amoled'; }
+})();
+</script>
+<style>
+/* ============================================================
+   TOKENS — every colour lives here. No hard-coded colours below.
+   Contrast (body text vs its background), measured as ratios:
+     Light      text #14181A on #FFFFFF ....... 17.4:1
+                muted #4A5459 on #FFFFFF ......  7.4:1
+                accent #0F766E on #FFFFFF .....  5.1:1
+     AMOLED     text #F2F5F6 on #000000 ....... 18.6:1
+                muted #A8B3B7 on #000000 ......  9.7:1
+                accent #2DD4BF on #000000 ..... 11.4:1
+     Dim Grey   text #E8ECEE on #121212 ....... 15.3:1
+                muted #A0AAAE on #121212 ......  7.6:1
+     High Con.  text #FFFFFF on #000000 ....... 21.0:1
+                accent #FFD400 on #000000 ..... 15.9:1
+   Large headings and disabled states clear 3:1 in all four.
+   ============================================================ */
+:root{
+  --r:14px; --r-sm:9px;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Roboto Mono", "DejaVu Sans Mono", Consolas, monospace;
+  --sp:14px;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --surface:#f4f6f7; --surface-2:#e9edef; --sunk:#ffffff;
+  --text:#14181a; --muted:#4a5459; --border:#d2d9dc; --grid:#e3e8ea;
+  --accent:#c2410c; --accent-soft:#fdeadf; --on-accent:#ffffff;
+  --warm:#41505b; --warm-soft:#e9edf0; --err-soft:#fde6e4;
+  --ok:#166534; --warn:#8a5200; --danger:#b3261e; --shadow:0 1px 2px rgba(0,0,0,.12);
+}
+:root[data-theme="amoled"]{
+  --bg:#000000; --surface:#0a0c0d; --surface-2:#14191a; --sunk:#000000;
+  --text:#f2f5f6; --muted:#a8b3b7; --border:#232a2c; --grid:#1b2122;
+  --accent:#fb923c; --accent-soft:#2a1509; --on-accent:#1a0800;
+  --warm:#c8d2d8; --warm-soft:#151a1c; --err-soft:#2b1210;
+  --ok:#4ade80; --warn:#facc15; --danger:#ff8a80; --shadow:none;
+}
+:root[data-theme="dim"]{
+  --bg:#121212; --surface:#1a1d1e; --surface-2:#242829; --sunk:#0e1011;
+  --text:#e8ecee; --muted:#a0aaae; --border:#31373a; --grid:#272c2e;
+  --accent:#fb923c; --accent-soft:#2c1710; --on-accent:#1a0800;
+  --warm:#c8d2d8; --warm-soft:#1e2325; --err-soft:#2f1614;
+  --ok:#4ade80; --warn:#facc15; --danger:#ff8a80; --shadow:none;
+}
+:root[data-theme="hc"]{
+  --bg:#000000; --surface:#000000; --surface-2:#0b0b0b; --sunk:#000000;
+  --text:#ffffff; --muted:#ffffff; --border:#ffffff; --grid:#6b6b6b;
+  --accent:#ffd400; --accent-soft:#2b2400; --on-accent:#000000;
+  --warm:#ffffff; --warm-soft:#1a1a1a; --err-soft:#2a0f0f;
+  --ok:#7cff7c; --warn:#ffd400; --danger:#ff9d9d; --shadow:none;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text); font-family:var(--sans);
+  font-size:16px; line-height:1.45; -webkit-text-size-adjust:100%;
+  padding-bottom:calc(70px + env(safe-area-inset-bottom));
+}
+.num{font-family:var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.01em}
+h1,h2,h3{line-height:1.2; margin:0}
+a{color:var(--accent)}
+:focus-visible{outline:3px solid var(--accent); outline-offset:2px; border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+
+/* ---------- header ---------- */
+header.top{
+  position:sticky; top:0; z-index:40; background:var(--bg);
+  border-bottom:1px solid var(--border);
+  padding:calc(env(safe-area-inset-top) + 10px) var(--sp) 8px;
+  display:flex; align-items:center; gap:10px;
+}
+header.top .brand{flex:1; min-width:0}
+.logomark{flex:0 0 36px; width:36px; height:36px; display:block}
+.logomark .steel{stroke:var(--text)}
+.logomark .steelf{fill:var(--text)}
+.logomark .speed{stroke:var(--accent)}
+.logomark .ring{stroke:var(--muted)}
+header.top .brand b{display:block; font-size:16px; letter-spacing:.2px}
+header.top .brand small{display:block; color:var(--muted); font-size:11.5px; letter-spacing:.06em; text-transform:uppercase}
+.iconbtn{
+  min-width:44px; min-height:44px; border-radius:var(--r-sm); border:1px solid var(--border);
+  background:var(--surface); color:var(--text); font-size:18px; cursor:pointer;
+  display:inline-flex; align-items:center; justify-content:center;
+}
+.chipbar{display:flex; gap:8px; flex-wrap:wrap; padding:8px var(--sp) 0}
+.nagchip{
+  border:1px solid var(--warm); background:var(--warm-soft); color:var(--text);
+  border-radius:999px; padding:8px 14px; font-size:13px; cursor:pointer; min-height:38px;
+}
+
+/* ---------- layout ---------- */
+main{padding:var(--sp); max-width:980px; margin:0 auto}
+.view{display:none}
+.view.active{display:block}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
+  padding:14px; margin:0 0 12px; box-shadow:var(--shadow);
+}
+.card > h2{font-size:15px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; font-weight:600}
+.row{display:flex; gap:10px; flex-wrap:wrap}
+.row > *{flex:1 1 140px; min-width:0}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.tiny{font-size:11.5px}
+.spread{display:flex; justify-content:space-between; align-items:center; gap:10px}
+hr.sep{border:0; border-top:1px solid var(--border); margin:12px 0}
+
+/* ---------- controls ---------- */
+label.fl{display:block; font-size:12px; color:var(--muted); margin:0 0 4px; letter-spacing:.03em}
+input,select,textarea,button{font-family:inherit; font-size:16px; color:var(--text)}
+input,select,textarea{
+  width:100%; background:var(--sunk); border:1px solid var(--border); color:var(--text);
+  border-radius:var(--r-sm); padding:11px 12px; min-height:44px;
+}
+textarea{min-height:70px; resize:vertical}
+input::placeholder,textarea::placeholder{color:var(--muted); opacity:.85}
+.btn{
+  min-height:44px; padding:11px 16px; border-radius:var(--r-sm); cursor:pointer;
+  border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-weight:600;
+}
+.btn.primary{background:var(--accent); color:var(--on-accent); border-color:var(--accent)}
+.btn.warm{background:var(--warm); color:var(--on-accent); border-color:var(--warm)}
+.btn.danger{border-color:var(--danger); color:var(--danger); background:transparent}
+.btn.ghost{background:transparent}
+.btn[disabled]{opacity:.5; cursor:not-allowed}
+.btn.wide{width:100%}
+.seg{display:flex; gap:6px; flex-wrap:wrap}
+.seg button{
+  flex:1 1 auto; min-height:44px; padding:10px 12px; border-radius:999px; cursor:pointer;
+  border:1px solid var(--border); background:transparent; color:var(--text); font-size:14px;
+}
+.seg button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:700}
+
+/* ---------- signature element: the fade bar ---------- */
+.fade-wrap{background:var(--sunk); border:1px solid var(--border); border-radius:var(--r); padding:14px}
+.fade-row{display:flex; align-items:center; gap:10px; margin:0 0 8px}
+.fade-row .tag{width:52px; font-size:11.5px; color:var(--muted); letter-spacing:.05em}
+.fade-track{flex:1; height:20px; background:var(--surface-2); border-radius:4px; overflow:hidden; position:relative}
+.fade-fill{height:100%; background:var(--accent); border-radius:4px 0 0 4px}
+.fade-fill.second{background:var(--warm)}
+.fade-row .val{width:96px; text-align:right; font-size:13px}
+.fade-verdict{display:flex; align-items:baseline; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border)}
+.fade-verdict .big{font-size:34px; font-weight:700; line-height:1}
+.fade-verdict .lbl{font-size:12px; color:var(--muted)}
+.formula{font-size:12px; color:var(--muted); margin-top:8px; line-height:1.5}
+
+/* ---------- stats ---------- */
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:8px}
+.stat{background:var(--sunk); border:1px solid var(--border); border-radius:var(--r-sm); padding:10px}
+.stat .k{font-size:11px; color:var(--muted); letter-spacing:.05em; text-transform:uppercase}
+.stat .v{font-size:21px; font-weight:700; margin-top:2px}
+.stat .u{font-size:12px; color:var(--muted); font-weight:400}
+
+/* ---------- lists ---------- */
+.daygroup{margin:16px 0 6px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
+.item{
+  background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent);
+  border-radius:var(--r-sm); padding:12px; margin-bottom:8px; cursor:pointer;
+}
+.item.evening{border-left-color:var(--warm)}
+.item .l1{display:flex; justify-content:space-between; gap:8px; align-items:baseline}
+.item .l2{font-size:13px; color:var(--muted); margin-top:4px}
+.badge{font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--border); white-space:nowrap}
+.badge.good{border-color:var(--ok); color:var(--ok)}
+.badge.mid{border-color:var(--warn); color:var(--warn)}
+.badge.bad{border-color:var(--danger); color:var(--danger)}
+.empty{border:1px dashed var(--border); border-radius:var(--r); padding:26px 16px; text-align:center; color:var(--muted)}
+.empty b{display:block; color:var(--text); margin-bottom:6px}
+
+/* ---------- timer ---------- */
+.timer-face{
+  background:var(--sunk); border:1px solid var(--border); border-radius:var(--r);
+  padding:22px 14px; text-align:center;
+}
+.timer-phase{font-size:13px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
+.timer-clock{font-size:clamp(60px,22vw,110px); font-weight:700; line-height:1; margin:6px 0}
+.timer-clock.run{color:var(--accent)}
+.timer-clock.rest{color:var(--warm)}
+.timer-sub{font-size:14px; color:var(--muted)}
+.progress{height:8px; background:var(--surface-2); border-radius:999px; overflow:hidden; margin:16px 0 4px}
+.progress > div{height:100%; background:var(--accent); width:0%}
+.progress.rest > div{background:var(--warm)}
+
+/* ---------- tables ---------- */
+.tblwrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+table{border-collapse:collapse; width:100%; font-size:13px}
+th,td{border:1px solid var(--border); padding:7px 9px; text-align:left; vertical-align:top}
+th{background:var(--surface-2); font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); white-space:nowrap}
+td.n,th.n{text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums}
+tr.err td{background:var(--err-soft)}
+tr.warnrow td{background:var(--accent-soft)}
+td .cellin{min-height:34px; padding:5px 6px; font-size:13px}
+
+/* ---------- charts ---------- */
+.chartbox{background:var(--sunk); border:1px solid var(--border); border-radius:var(--r); padding:10px}
+svg.chart{width:100%; height:auto; display:block}
+svg.chart .grid{stroke:var(--grid); stroke-width:1}
+svg.chart .axis{fill:var(--muted); font-size:11px; font-family:var(--mono)}
+svg.chart .s1{stroke:var(--accent); fill:none; stroke-width:2.5; stroke-linejoin:round; stroke-linecap:round}
+svg.chart .s2{stroke:var(--warm); fill:none; stroke-width:2.5; stroke-linejoin:round; stroke-linecap:round}
+svg.chart .s1d{fill:var(--accent)}
+svg.chart .s2d{fill:var(--warm)}
+.legend{display:flex; gap:14px; flex-wrap:wrap; font-size:12.5px; margin-top:8px; color:var(--muted)}
+.legend i{display:inline-block; width:14px; height:3px; border-radius:2px; vertical-align:middle; margin-right:6px}
+.legend i.a{background:var(--accent)} .legend i.b{background:var(--warm)}
+.hbars{display:grid; gap:8px}
+.hbar{display:grid; grid-template-columns:80px 1fr 70px; gap:8px; align-items:center; font-size:13px}
+.hbar .t{height:16px; background:var(--surface-2); border-radius:3px; overflow:hidden}
+.hbar .t > div{height:100%; background:var(--accent)}
+.hbar.b .t > div{background:var(--warm)}
+
+/* ---------- sheet / modal ---------- */
+.scrim{position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:60; display:none}
+.scrim.open{display:block}
+.sheet{
+  position:fixed; left:0; right:0; bottom:0; z-index:61; background:var(--bg);
+  border-top:1px solid var(--border); border-radius:18px 18px 0 0;
+  max-height:88vh; overflow:auto; display:none;
+  padding:14px var(--sp) calc(20px + env(safe-area-inset-bottom));
+}
+.sheet.open{display:block}
+.sheet .grab{width:44px; height:4px; border-radius:2px; background:var(--border); margin:2px auto 12px}
+@media(min-width:760px){
+  .sheet{left:50%; right:auto; bottom:auto; top:50%; transform:translate(-50%,-50%); width:min(680px,94vw); border-radius:var(--r); border:1px solid var(--border)}
+}
+
+/* ---------- toast ---------- */
+#toast{
+  position:fixed; left:50%; transform:translateX(-50%); bottom:calc(86px + env(safe-area-inset-bottom));
+  background:var(--surface-2); color:var(--text); border:1px solid var(--border);
+  padding:11px 16px; border-radius:999px; z-index:90; font-size:14px; display:none; max-width:92vw; text-align:center;
+}
+#toast.show{display:block}
+
+/* ---------- bottom nav ---------- */
+nav.bottom{
+  position:fixed; left:0; right:0; bottom:0; z-index:50; background:var(--bg);
+  border-top:1px solid var(--border); display:flex;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav.bottom button{
+  flex:1; min-height:60px; border:0; background:transparent; color:var(--muted);
+  font-size:11px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  padding:6px 2px; letter-spacing:.02em;
+}
+nav.bottom button .ic{font-size:19px; line-height:1}
+nav.bottom button[aria-current="page"]{color:var(--accent); font-weight:700}
+
+/* ---------- print report host ---------- */
+#printHost{display:none}
+.rpt{color:#000; background:#fff; font-family:var(--sans)}
+.rpt h1{font-size:19pt; margin:0 0 2mm}
+.rpt .sub{font-size:10pt; color:#333}
+.rpt .rhead{border-bottom:2px solid #000; padding-bottom:3mm; margin-bottom:4mm}
+.rpt .meta{display:flex; flex-wrap:wrap; gap:3mm 8mm; font-size:9.5pt; color:#222; margin-top:2mm}
+.rpt h2{font-size:11.5pt; margin:6mm 0 2mm; border-bottom:1px solid #666; padding-bottom:1mm; text-transform:uppercase; letter-spacing:.06em}
+.rpt table{font-size:9pt; width:100%}
+.rpt th,.rpt td{border:1px solid #777; padding:1.6mm 2mm}
+.rpt th{background:#e8e8e8; color:#000}
+.rpt .sumgrid{display:grid; grid-template-columns:repeat(4,1fr); gap:3mm}
+.rpt .sumbox{border:1px solid #777; padding:2.5mm}
+.rpt .sumbox .k{font-size:8pt; text-transform:uppercase; letter-spacing:.05em; color:#333}
+.rpt .sumbox .v{font-size:15pt; font-weight:700}
+.rpt .sign{margin-top:12mm; display:flex; gap:14mm}
+.rpt .sign div{flex:1; border-top:1px solid #000; padding-top:2mm; font-size:9pt}
+.rpt .foot{margin-top:8mm; border-top:1px solid #777; padding-top:2mm; font-size:8pt; color:#333; display:flex; justify-content:space-between}
+.rpt svg .grid{stroke:#ccc} .rpt svg .axis{fill:#333} 
+.rpt svg .s1{stroke:#b3400b; fill:none; stroke-width:2}
+.rpt svg .s2{stroke:#3f4a52; fill:none; stroke-width:2}
+.rpt svg .s1d{fill:#b3400b} .rpt svg .s2d{fill:#3f4a52}
+
+/* ---------- print ---------- */
+@page{ size:A4 landscape; margin:14mm 12mm; }
+@media print{
+  html,body{background:#fff!important; color:#000!important}
+  body{padding:0!important}
+  body > *{display:none!important}
+  body > #printHost{display:block!important}
+  .no-print{display:none!important}
+  thead{display:table-header-group}
+  tr,.rpt .sumbox{break-inside:avoid}
+  .page-break{break-before:page}
+  *{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+}
+@media (display-mode:standalone){ .hide-standalone{display:none!important} }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <svg class="logomark" viewBox="0 0 64 64" aria-hidden="true" focusable="false" fill="none" stroke-linecap="round" stroke-linejoin="round"><path class="ring" d="M 21 7 A 27 27 0 0 0 21 57" stroke-width="2.8"/><path class="speed" d="M 43 5.9 A 27 27 0 0 1 43 58.1" stroke-width="2.8"/><g class="speed" stroke-width="2.8"><path d="M 2.5 22 H 15"/><path d="M 5.5 29.5 H 13.5"/><path d="M 8.5 37 H 14"/></g><g class="steel"><path d="M 39.2 23.4 L 26.6 35.8" stroke-width="6.2"/><path d="M 41.4 20.4 L 39.4 23.2" stroke-width="4.4"/><path d="M 37.6 25 L 29.4 20 L 22.4 22.6" stroke-width="4.8"/><path d="M 39.6 24.8 L 47 29.6 L 44.4 35.6" stroke-width="4.8"/><path d="M 27.2 36 L 36.8 38.8 L 34 46.8" stroke-width="5.4"/><path d="M 34.2 47 L 39.4 48.2" stroke-width="4"/><path d="M 26.4 36.4 L 18.6 44.6 L 22.6 52" stroke-width="5.4"/><path d="M 22.4 52.2 L 19 55.2" stroke-width="4"/></g><circle class="steelf" cx="43.4" cy="17.4" r="5"/><path class="ring" d="M 15.5 57.5 Q 32 61.5 48.5 55.5" stroke-width="2.2"/></svg>
+  <div class="brand">
+    <b>Sprint Repeat Log</b>
+    <small id="brandSub">60 s · rest · 60 s</small>
+  </div>
+  <button class="iconbtn no-print" id="btnExportChip" title="Export backup" hidden>⤓</button>
+  <button class="iconbtn no-print hide-standalone" id="btnInstall" title="Install app" hidden>＋</button>
+  <button class="iconbtn no-print" id="btnSettings" title="Settings" aria-label="Settings">⚙</button>
+</header>
+<div class="chipbar no-print" id="chipbar"></div>
+
+<main>
+
+<!-- ==================== LOG ==================== -->
+<section class="view active" id="viewLog">
+  <div class="card">
+    <div class="spread" style="margin-bottom:10px">
+      <h2 style="margin:0" id="formTitle">New session</h2>
+      <button class="btn ghost small" id="btnClearForm" style="min-height:36px;padding:6px 12px">Clear</button>
+    </div>
+
+    <div class="row">
+      <div style="flex:1 1 150px">
+        <label class="fl" for="fDate">Date</label>
+        <input type="date" id="fDate">
+      </div>
+      <div style="flex:1 1 150px">
+        <label class="fl" for="fSurface">Surface</label>
+        <select id="fSurface"></select>
+      </div>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="fl">Session</label>
+      <div class="seg" id="segSlot"></div>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <div style="flex:2 1 180px">
+        <label class="fl" for="fLocation">Location</label>
+        <input type="text" id="fLocation" placeholder="Track, deck, seafront…">
+      </div>
+      <div style="flex:1 1 110px">
+        <label class="fl" for="fRest">Rest (s)</label>
+        <input type="number" id="fRest" inputmode="numeric" min="0" step="5" value="180">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="spread" style="margin-bottom:10px">
+      <h2 style="margin:0">Reps</h2>
+      <div style="display:flex;gap:6px">
+        <button class="btn ghost" id="btnAddRep" style="min-height:36px;padding:6px 12px">+ Rep</button>
+        <button class="btn ghost" id="btnDelRep" style="min-height:36px;padding:6px 12px">− Rep</button>
+      </div>
+    </div>
+    <div id="repRows"></div>
+    <p class="tiny muted" style="margin:8px 0 0">Time accepts seconds (<span class="num">63</span>) or mm:ss (<span class="num">1:03</span>). Distance in metres.</p>
+  </div>
+
+  <div class="card">
+    <h2>Fade check</h2>
+    <div class="fade-wrap" id="fadeBox"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div style="flex:1 1 120px">
+        <label class="fl" for="fRpe">Effort (RPE 1–10)</label>
+        <input type="number" id="fRpe" inputmode="numeric" min="1" max="10" step="1" placeholder="7">
+      </div>
+      <div style="flex:1 1 110px">
+        <label class="fl" for="fHrRest">Resting HR</label>
+        <input type="number" id="fHrRest" inputmode="numeric" min="20" max="140" placeholder="bpm">
+      </div>
+      <div style="flex:1 1 110px">
+        <label class="fl" for="fHrPeak">Peak HR</label>
+        <input type="number" id="fHrPeak" inputmode="numeric" min="60" max="230" placeholder="bpm">
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <label class="fl" for="fNotes">Notes</label>
+      <textarea id="fNotes" placeholder="Wind, legs, shoes, anything that explains the number."></textarea>
+    </div>
+  </div>
+
+  <button class="btn primary wide" id="btnSave" style="font-size:17px;min-height:52px">Save session</button>
+  <button class="btn ghost wide" id="btnCancelEdit" style="margin-top:8px" hidden>Cancel edit</button>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Recent</h2>
+    <div id="recentList"></div>
+  </div>
+</section>
+
+<!-- ==================== TIMER ==================== -->
+<section class="view" id="viewTimer">
+  <div class="card">
+    <h2>Protocol</h2>
+    <div class="row">
+      <div style="flex:1 1 110px">
+        <label class="fl" for="tReps">Reps</label>
+        <input type="number" id="tReps" inputmode="numeric" min="1" max="4" value="2">
+      </div>
+      <div style="flex:1 1 110px">
+        <label class="fl" for="tRun">Run (s)</label>
+        <input type="number" id="tRun" inputmode="numeric" min="5" step="5" value="60">
+      </div>
+      <div style="flex:1 1 110px">
+        <label class="fl" for="tRest">Rest (s)</label>
+        <input type="number" id="tRest" inputmode="numeric" min="10" step="10" value="180">
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <label class="fl">Mode</label>
+      <div class="seg" id="segMode">
+        <button type="button" data-mode="time" aria-pressed="true">Fixed time — measure distance</button>
+        <button type="button" data-mode="dist" aria-pressed="false">Fixed distance — measure time</button>
+      </div>
+      <p class="tiny muted" id="modeHelp" style="margin:8px 0 0"></p>
+    </div>
+  </div>
+
+  <div class="timer-face">
+    <div class="timer-phase" id="tPhase">Ready</div>
+    <div class="timer-clock num" id="tClock">00:00</div>
+    <div class="timer-sub" id="tSub">Rep 0 of 2</div>
+    <div class="progress" id="tProgWrap"><div id="tProg"></div></div>
+  </div>
+
+  <div class="row" style="margin-top:12px">
+    <button class="btn primary" id="btnTimerStart" style="flex:2 1 200px;min-height:52px;font-size:17px">Start</button>
+    <button class="btn" id="btnTimerLap" style="flex:1 1 120px;min-height:52px" hidden>Lap</button>
+    <button class="btn danger" id="btnTimerStop" style="flex:1 1 120px;min-height:52px" hidden>Stop</button>
+  </div>
+  <p class="small muted" style="margin-top:10px">Beeps at every phase change and counts down the last 3 seconds. Keep the screen on — the app asks for a wake lock while the timer runs. When it finishes, the reps land in the log form for you to fill in and save.</p>
+</section>
+
+<!-- ==================== HISTORY ==================== -->
+<section class="view" id="viewHistory">
+  <div class="card no-print">
+    <h2>Filter</h2>
+    <div class="row">
+      <div style="flex:1 1 150px"><label class="fl" for="hFrom">From</label><input type="date" id="hFrom"></div>
+      <div style="flex:1 1 150px"><label class="fl" for="hTo">To</label><input type="date" id="hTo"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1 1 150px"><label class="fl" for="hSlot">Session</label><select id="hSlot"></select></div>
+      <div style="flex:1 1 150px"><label class="fl" for="hSurface">Surface</label><select id="hSurface"></select></div>
+    </div>
+    <div style="margin-top:10px"><label class="fl" for="hText">Search notes / location</label><input type="text" id="hText" placeholder="Type to filter"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="hReset">Reset filters</button>
+      <button class="btn ghost" id="hCopyAI">Copy records for AI</button>
+    </div>
+  </div>
+  <div id="historySummary"></div>
+  <div id="historyList"></div>
+</section>
+
+<!-- ==================== CHARTS ==================== -->
+<section class="view" id="viewCharts">
+  <div class="card">
+    <h2>Range</h2>
+    <div class="seg" id="segRange">
+      <button type="button" data-days="30" aria-pressed="true">30 days</button>
+      <button type="button" data-days="90" aria-pressed="false">90 days</button>
+      <button type="button" data-days="365" aria-pressed="false">1 year</button>
+      <button type="button" data-days="0" aria-pressed="false">All</button>
+    </div>
+    <div style="margin-top:10px">
+      <label class="fl">Split by session</label>
+      <div class="seg" id="segSplit">
+        <button type="button" data-split="0" aria-pressed="true">Combined</button>
+        <button type="button" data-split="1" aria-pressed="false">Morning vs Evening</button>
+      </div>
+    </div>
+  </div>
+  <div id="chartsOut"></div>
+</section>
+
+<!-- ==================== REPORT ==================== -->
+<section class="view" id="viewReport">
+  <div class="card no-print">
+    <h2>Build report</h2>
+    <div class="row">
+      <div style="flex:1 1 150px"><label class="fl" for="rFrom">From</label><input type="date" id="rFrom"></div>
+      <div style="flex:1 1 150px"><label class="fl" for="rTo">To</label><input type="date" id="rTo"></div>
+    </div>
+    <div class="seg" style="margin-top:10px" id="segRPreset">
+      <button type="button" data-days="7">Last 7 d</button>
+      <button type="button" data-days="30">Last 30 d</button>
+      <button type="button" data-days="90">Last 90 d</button>
+      <button type="button" data-days="0">All</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1 1 150px"><label class="fl" for="rSlot">Session</label><select id="rSlot"></select></div>
+      <div style="flex:1 1 150px"><label class="fl" for="rSurface">Surface</label><select id="rSurface"></select></div>
+    </div>
+    <hr class="sep">
+    <div class="row">
+      <label class="small" style="flex:1 1 160px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="rChart" checked style="width:auto;min-height:auto"> Progression chart</label>
+      <label class="small" style="flex:1 1 160px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="rNotes" checked style="width:auto;min-height:auto"> Notes column</label>
+      <label class="small" style="flex:1 1 160px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="rAudit" style="width:auto;min-height:auto"> Audit trail</label>
+      <label class="small" style="flex:1 1 160px;display:flex;gap:8px;align-items:center"><input type="checkbox" id="rSign" style="width:auto;min-height:auto"> Signature block</label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1 1 150px"><label class="fl" for="rOrient">Orientation</label><select id="rOrient"><option value="landscape">Landscape</option><option value="portrait">Portrait</option></select></div>
+      <div style="flex:1 1 150px"><label class="fl" for="rPaper">Paper</label><select id="rPaper"><option value="A4">A4</option><option value="Letter">Letter</option></select></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="btnBuildReport">Update preview</button>
+      <button class="btn primary" id="btnPrint">Print / Save PDF</button>
+    </div>
+    <p class="tiny muted" style="margin:10px 0 0">In the print dialogue turn <b>off</b> "Headers and footers" — otherwise Chrome stamps its own URL and page numbers over this layout. Android's print flow ignores some page settings; if the table crops, print from desktop.</p>
+  </div>
+  <div class="card no-print" style="background:var(--sunk)">
+    <h2>Preview</h2>
+    <div class="tblwrap"><div id="reportPreview" class="rpt" style="min-width:700px;padding:8px"></div></div>
+  </div>
+</section>
+
+<!-- ==================== BULK IMPORT ==================== -->
+<section class="view" id="viewImport">
+  <div class="card">
+    <h2>Paste from a spreadsheet or a chat</h2>
+    <p class="small muted" style="margin:0 0 10px">Copy a block of cells out of Excel or Sheets and paste it here, or paste TSV from a dictation session. A JSON array of records works too.</p>
+    <textarea id="pasteBox" style="min-height:150px;font-family:var(--mono);font-size:13px" placeholder="Paste rows here — header row first."></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn primary" id="btnParsePaste">Check rows</button>
+      <button class="btn ghost" id="btnClearPaste">Clear</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Or use a file</h2>
+    <div class="row">
+      <button class="btn" id="btnTemplate">Download CSV template</button>
+      <button class="btn" id="btnPickCsv">Upload .csv</button>
+      <button class="btn" id="btnCopySchema">Copy AI schema</button>
+    </div>
+    <input type="file" id="fileCsv" accept=".csv,text/csv" hidden>
+    <p class="tiny muted" style="margin:10px 0 0">The template carries the <b>id</b> column. Export → edit in Excel → paste back and it updates those sessions instead of duplicating them.</p>
+  </div>
+
+  <div id="importStage"></div>
+</section>
+
+<!-- ==================== SETTINGS ==================== -->
+<section class="view" id="viewSettings">
+  <div class="card">
+    <h2>Theme</h2>
+    <div class="seg" id="segTheme">
+      <button type="button" data-theme="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme="amoled" aria-pressed="true">AMOLED Black</button>
+      <button type="button" data-theme="dim" aria-pressed="false">Dim Grey</button>
+      <button type="button" data-theme="hc" aria-pressed="false">High Contrast</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Defaults</h2>
+    <div class="row">
+      <div style="flex:1 1 130px"><label class="fl" for="sAthlete">Name on reports</label><input type="text" id="sAthlete" placeholder="Your name"></div>
+      <div style="flex:1 1 110px"><label class="fl" for="sRest">Rest (s)</label><input type="number" id="sRest" inputmode="numeric" value="180"></div>
+      <div style="flex:1 1 110px"><label class="fl" for="sRun">Run (s)</label><input type="number" id="sRun" inputmode="numeric" value="60"></div>
+      <div style="flex:1 1 110px"><label class="fl" for="sDist">Target (m)</label><input type="number" id="sDist" inputmode="numeric" value="200"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1 1 150px"><label class="fl" for="sSurface">Surface</label><select id="sSurface"></select></div>
+      <div style="flex:1 1 150px"><label class="fl" for="sSound">Timer sound</label><select id="sSound"><option value="1">On</option><option value="0">Off</option></select></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Data safety</h2>
+    <div id="storageStatus" class="small"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnPersist">Request persistent storage</button>
+      <button class="btn" id="btnPickAutoSave">Set auto-save file</button>
+      <button class="btn ghost" id="btnClearAutoSave">Clear auto-save</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Backup</h2>
+    <div class="row">
+      <button class="btn primary" id="btnExportJson">Export JSON backup</button>
+      <button class="btn" id="btnExportCsv">Export CSV</button>
+      <button class="btn" id="btnImportJson">Import JSON (merge)</button>
+      <button class="btn ghost" id="btnShare">Share backup</button>
+    </div>
+    <input type="file" id="fileJson" accept=".json,application/json" hidden>
+    <div id="backupStatus" class="small muted" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Snapshots &amp; undo</h2>
+    <div id="snapList" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h2>Help</h2>
+    <div class="small muted" id="helpText"></div>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <div class="small" id="aboutText"></div>
+  </div>
+</section>
+
+</main>
+
+<div class="scrim no-print" id="scrim"></div>
+<div class="sheet no-print" id="sheet"><div class="grab"></div><div id="sheetBody"></div></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<nav class="bottom no-print" id="nav">
+  <button data-view="viewLog" aria-current="page"><span class="ic">✎</span>Log</button>
+  <button data-view="viewTimer"><span class="ic">⏱</span>Timer</button>
+  <button data-view="viewHistory"><span class="ic">☰</span>History</button>
+  <button data-view="viewCharts"><span class="ic">📈</span>Charts</button>
+  <button data-view="viewReport"><span class="ic">🖨</span>Report</button>
+</nav>
+
+<div id="printHost"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   Sprint Repeat Log — single file, offline, IndexedDB.
+   ============================================================ */
+const APP = { id:'sprintlog', name:'Sprint Repeat Log', version:'1.1.0', schemaVersion:1 };
+const DB_NAME='sprintlog-db', DB_VER=1;
+const SLOTS=['Morning','Afternoon','Evening','Night'];
+const SURFACES=['Track','Road','Treadmill','Grass','Deck','Sand','Other'];
+const MAX_REPS=4;
+const WHATS_NEW=[
+  'v1.1.0 — packaged for GitHub Pages: real manifest, offline service worker, installable icons, new mark. Palette moved to speed orange on steel.',
+  'v1.0.0 — first build. Session log with up to 4 reps, fade %, interval timer with beeps and wake lock, charts, printable A4 report, bulk paste import, JSON/CSV backup with merge, rolling snapshots, four themes.'
+];
+
+/* ---------- tiny utils ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+function uuid(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){
+    const r=Math.random()*16|0, v=c==='x'?r:((r&0x3)|0x8); return v.toString(16);
+  });
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function pad2(n){ return String(n).padStart(2,'0'); }
+function todayISO(d){ const x=d?new Date(d):new Date(); return x.getFullYear()+'-'+pad2(x.getMonth()+1)+'-'+pad2(x.getDate()); }
+function isoDT(ms){
+  const d=new Date(ms); const off=-d.getTimezoneOffset();
+  const sg=off>=0?'+':'-', a=Math.abs(off);
+  return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'T'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds())+sg+pad2(Math.floor(a/60))+':'+pad2(a%60);
+}
+function fmtAbs(ms){ const d=new Date(ms); return d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+function fmtDate(ms){ const d=new Date(ms); return d.toLocaleDateString(undefined,{weekday:'short',day:'2-digit',month:'short',year:'numeric'}); }
+function fmtRel(ms){
+  const s=Math.round((Date.now()-ms)/1000);
+  if(s<60) return 'just now';
+  if(s<3600) return Math.round(s/60)+' min ago';
+  if(s<86400) return Math.round(s/3600)+' h ago';
+  const d=Math.round(s/86400);
+  if(d<31) return d+' d ago';
+  if(d<365) return Math.round(d/30)+' mo ago';
+  return Math.round(d/365)+' y ago';
+}
+function mmss(sec){ sec=Math.max(0,Math.round(sec)); return pad2(Math.floor(sec/60))+':'+pad2(sec%60); }
+function num(v){ if(v===''||v==null) return null; const n=Number(v); return isFinite(n)?n:null; }
+function parseTime(v){
+  if(v==null) return null;
+  const s=String(v).trim(); if(!s||s==='?') return null;
+  if(s.indexOf(':')>-1){
+    const p=s.split(':').map(x=>Number(x));
+    if(p.some(x=>!isFinite(x))) return null;
+    return p.length===2 ? p[0]*60+p[1] : (p.length===3 ? p[0]*3600+p[1]*60+p[2] : null);
+  }
+  const n=Number(s); return isFinite(n)?n:null;
+}
+function toast(msg,ms){
+  const t=$('#toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'), ms||2600);
+}
+function download(name, text, mime){
+  const blob=new Blob([text],{type:mime||'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); return true; }
+  catch(e){
+    const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    let ok=false; try{ ok=document.execCommand('copy'); }catch(_){}
+    ta.remove(); return ok;
+  }
+}
+
+/* ---------- IndexedDB ---------- */
+let _db=null;
+function openDB(){
+  return new Promise((res,rej)=>{
+    if(_db) return res(_db);
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=function(e){
+      const db=r.result, old=e.oldVersion;
+      /* Migrations only add. Never wipe. */
+      if(old<1){
+        db.createObjectStore('records',{keyPath:'id'});
+        db.createObjectStore('meta',{keyPath:'k'});
+        db.createObjectStore('log',{keyPath:'id'});
+        db.createObjectStore('backups',{keyPath:'id'});
+      }
+    };
+    r.onsuccess=()=>{ _db=r.result; res(_db); };
+    r.onerror=()=>rej(r.error);
+  });
+}
+function reqP(r){ return new Promise((res,rej)=>{ r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function txDone(t){ return new Promise((res,rej)=>{ t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error||new Error('aborted')); }); }
+async function dbGet(store,key){ const db=await openDB(); return reqP(db.transaction(store).objectStore(store).get(key)); }
+async function dbGetAll(store){ const db=await openDB(); return reqP(db.transaction(store).objectStore(store).getAll()); }
+async function dbPut(store,val){ const db=await openDB(); const t=db.transaction(store,'readwrite'); t.objectStore(store).put(val); await txDone(t); return val; }
+async function dbDel(store,key){ const db=await openDB(); const t=db.transaction(store,'readwrite'); t.objectStore(store).delete(key); await txDone(t); }
+async function dbBulkPut(store,arr){
+  if(!arr.length) return 0;
+  const db=await openDB(); const t=db.transaction(store,'readwrite'); const s=t.objectStore(store);
+  arr.forEach(v=>s.put(v)); await txDone(t); return arr.length;
+}
+async function dbBulkDel(store,keys){
+  if(!keys.length) return 0;
+  const db=await openDB(); const t=db.transaction(store,'readwrite'); const s=t.objectStore(store);
+  keys.forEach(k=>s.delete(k)); await txDone(t); return keys.length;
+}
+async function metaGet(k,def){ const r=await dbGet('meta',k); return r===undefined?def:r.v; }
+async function metaSet(k,v){ return dbPut('meta',{k:k,v:v}); }
+
+/* ---------- state ---------- */
+const state = {
+  records:[], log:[], settings:{}, deviceId:'',
+  view:'viewLog', editingId:null, repCount:2,
+  chartDays:30, chartSplit:false,
+  importRows:null, importCols:null,
+  lastExportAt:0, lastFileWriteAt:0, lastSnapshotAt:0,
+  fileHandle:null, persisted:false, installPrompt:null
+};
+
+/* ---------- records ---------- */
+function newRecord(type,data,source){
+  const now=Date.now();
+  return { id:uuid(), type:type, createdAt:now, updatedAt:now, deviceId:state.deviceId,
+           deleted:false, rev:1, source:source||'manual', data:data };
+}
+function liveSessions(){
+  return state.records.filter(r=>r.type==='session' && !r.deleted);
+}
+function slotHour(s){ const m={Morning:7,Afternoon:13,Evening:18,Night:21}; return m[s]!=null?m[s]:12; }
+function eventAtOf(d){
+  const p=String(d.date||'').split('-').map(Number);
+  if(p.length!==3 || !p[0]) return Date.now();
+  return new Date(p[0],p[1]-1,p[2], slotHour(d.slot),0,0,0).getTime();
+}
+function repMetrics(r){
+  if(!r || !(r.d>0) || !(r.t>0)) return null;
+  const speed=r.d/r.t;
+  return { speed:speed, kmh:speed*3.6, pace100:r.t/r.d*100, paceKm:r.t/r.d*1000 };
+}
+function sessionMetrics(rec){
+  const reps=(rec.data.reps||[]).filter(r=>r && r.d>0 && r.t>0);
+  const m=reps.map(repMetrics);
+  const totalD=reps.reduce((a,r)=>a+r.d,0);
+  const totalT=reps.reduce((a,r)=>a+r.t,0);
+  const speeds=m.map(x=>x.speed);
+  const first=speeds.length?speeds[0]:0;
+  const last=speeds.length?speeds[speeds.length-1]:0;
+  const best=speeds.length?Math.max.apply(null,speeds):0;
+  const worst=speeds.length?Math.min.apply(null,speeds):0;
+  return {
+    reps:reps, m:m, count:m.length, totalD:totalD, totalT:totalT,
+    first:first, last:last, best:best, worst:worst,
+    avg: totalT? totalD/totalT : 0,
+    fade: (speeds.length>1 && first>0) ? (first-last)/first*100 : null,
+    worstFade: (speeds.length>1 && first>0) ? (first-worst)/first*100 : null,
+    eventAt: eventAtOf(rec.data)
+  };
+}
+function fadeClass(f){
+  if(f==null) return '';
+  if(f<=3) return 'good';
+  if(f<=8) return 'mid';
+  return 'bad';
+}
+function fadeWord(f){
+  if(f==null) return 'Needs two reps';
+  if(f<=0) return 'Negative split';
+  if(f<=3) return 'Excellent';
+  if(f<=8) return 'Good';
+  if(f<=15) return 'Fading';
+  return 'Heavy fade';
+}
+
+/* ---------- audit log ---------- */
+async function addLog(entry){
+  const e=Object.assign({id:uuid(), ts:Date.now(), deviceId:state.deviceId}, entry);
+  await dbPut('log',e); state.log.push(e); return e;
+}
+function diffData(oldD,newD){
+  const out=[]; const keys=['date','slot','surface','location','restSec','rpe','hrRest','hrPeak','notes'];
+  keys.forEach(k=>{
+    const a=oldD[k]==null?'':String(oldD[k]), b=newD[k]==null?'':String(newD[k]);
+    if(a!==b) out.push({field:k, from:a, to:b});
+  });
+  const ra=JSON.stringify(oldD.reps||[]), rb=JSON.stringify(newD.reps||[]);
+  if(ra!==rb) out.push({field:'reps', from:repsText(oldD.reps), to:repsText(newD.reps)});
+  return out;
+}
+function repsText(reps){
+  return (reps||[]).filter(r=>r&&r.d&&r.t).map((r,i)=>'R'+(i+1)+' '+r.d+'m/'+r.t+'s').join(', ') || '—';
+}
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+async function boot(){
+  await openDB();
+  state.deviceId = await metaGet('deviceId', null);
+  if(!state.deviceId){
+    state.deviceId = 'dev-'+uuid().slice(0,8);
+    await metaSet('deviceId', state.deviceId);
+    await metaSet('schemaVersion', APP.schemaVersion);
+    await metaSet('createdAt', Date.now());
+  }
+  const sv = await metaGet('schemaVersion', APP.schemaVersion);
+  if(sv < APP.schemaVersion) await metaSet('schemaVersion', APP.schemaVersion);
+
+  state.settings = await metaGet('settings', {
+    theme:'amoled', athlete:'', defRest:180, defRun:60, defDist:200,
+    defSurface:'Track', sound:1, paper:'A4', orient:'landscape', colMap:null
+  });
+  state.lastExportAt = await metaGet('lastExportAt', 0);
+  state.lastFileWriteAt = await metaGet('lastFileWriteAt', 0);
+  state.lastSnapshotAt = await metaGet('lastSnapshotAt', 0);
+
+  applyTheme(state.settings.theme||'amoled');
+
+  state.records = await dbGetAll('records');
+  state.log = await dbGetAll('log');
+
+  try{ state.fileHandle = await metaGet('autoSaveHandle', null); }catch(e){ state.fileHandle=null; }
+  try{ state.persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : false; }catch(e){}
+  if(navigator.storage && navigator.storage.persist && !state.persisted){
+    try{ state.persisted = await navigator.storage.persist(); }catch(e){}
+  }
+
+  buildStaticUI();
+  wireEvents();
+  resetForm();
+  renderAll();
+  scheduleSnapshot(true);
+}
+
+/* ---------- theme ---------- */
+function applyTheme(t){
+  document.documentElement.dataset.theme=t;
+  try{ localStorage.setItem('sprintlog.theme',t); }catch(e){}
+  const c={light:'#ffffff', amoled:'#000000', dim:'#121212', hc:'#000000'}[t]||'#000000';
+  const m=$('#metaThemeColor'); if(m) m.setAttribute('content',c);
+  $$('#segTheme button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.theme===t)));
+  renderCharts();
+}
+
+/* ---------- static UI ---------- */
+function opts(list, withAll, allLabel){
+  let h = withAll ? '<option value="">'+(allLabel||'All')+'</option>' : '';
+  list.forEach(v=>{ h += '<option value="'+esc(v)+'">'+esc(v)+'</option>'; });
+  return h;
+}
+function buildStaticUI(){
+  $('#fSurface').innerHTML=opts(SURFACES,false);
+  $('#sSurface').innerHTML=opts(SURFACES,false);
+  $('#hSlot').innerHTML=opts(SLOTS,true,'Any session');
+  $('#rSlot').innerHTML=opts(SLOTS,true,'Any session');
+  $('#hSurface').innerHTML=opts(SURFACES,true,'Any surface');
+  $('#rSurface').innerHTML=opts(SURFACES,true,'Any surface');
+  $('#segSlot').innerHTML=SLOTS.map((s,i)=>'<button type="button" data-slot="'+s+'" aria-pressed="'+(i===0)+'">'+s+'</button>').join('');
+  $('#segTheme').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.theme===(state.settings.theme||'amoled'))));
+  $('#tRun').value=state.settings.defRun; $('#tRest').value=state.settings.defRest;
+  $('#sRest').value=state.settings.defRest; $('#sRun').value=state.settings.defRun;
+  $('#sDist').value=state.settings.defDist; $('#sAthlete').value=state.settings.athlete||'';
+  $('#sSurface').value=state.settings.defSurface||'Track';
+  $('#sSound').value=String(state.settings.sound?1:0);
+  $('#rOrient').value=state.settings.orient||'landscape';
+  $('#rPaper').value=state.settings.paper||'A4';
+  updateModeHelp();
+  $('#helpText').innerHTML = helpHTML();
+}
+function helpHTML(){
+  return [
+    '<p><b>The number that matters.</b> Fade % is how much slower your last rep was than your first. Two reps at 200 m in 60 s and 63 s is roughly a 4.8% fade. Lower is fitter — a single fast rep tells you much less.</p>',
+    '<p><b>Printing.</b> In the print dialogue, expand "More settings" and turn <b>off</b> "Headers and footers", or Chrome prints its own URL and page numbers over the report. Android\'s print flow drops some page settings; if the table crops, print the same report from Windows.</p>',
+    '<p><b>Backups.</b> Everything is written to this device\'s database the moment you save — there is no Save-and-lose-it window. On Windows you can point the app at a file once and it writes a real JSON backup there silently. On Android, use Export backup and drop the file into Drive.</p>',
+    '<p><b>Installing.</b> Chrome only offers the full install prompt when the page is served with a service worker. Opened from a file this still works as a normal page, and "Add to Home screen" from the Chrome menu gives you the icon.</p>'
+  ].join('');
+}
+function updateModeHelp(){
+  const m=$('#segMode').querySelector('button[aria-pressed="true"]').dataset.mode;
+  $('#modeHelp').textContent = m==='time'
+    ? 'The clock runs for the set time. Mark your finish point and enter the distance afterwards.'
+    : 'The clock counts up. Tap Lap the instant you cross your marker — the app records the time.';
+}
+
+/* ============================================================
+   NAVIGATION + back guard
+   ============================================================ */
+function setView(id, push){
+  state.view=id;
+  $$('.view').forEach(v=>v.classList.toggle('active', v.id===id));
+  $$('#nav button').forEach(b=>{
+    if(b.dataset.view===id) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
+  });
+  window.scrollTo(0,0);
+  if(id==='viewHistory') renderHistory();
+  if(id==='viewCharts') renderCharts();
+  if(id==='viewReport') buildReport();
+  if(id==='viewSettings') renderSettings();
+  if(push!==false && history.state && history.state.view!==id){
+    history.pushState({view:id},'','');
+  }
+}
+function openSheet(html){
+  $('#sheetBody').innerHTML=html;
+  $('#sheet').classList.add('open'); $('#scrim').classList.add('open');
+  history.pushState({sheet:true},'','');
+}
+function closeSheet(){
+  $('#sheet').classList.remove('open'); $('#scrim').classList.remove('open');
+}
+function isSheetOpen(){ return $('#sheet').classList.contains('open'); }
+
+/* ============================================================
+   LOG FORM
+   ============================================================ */
+function repRowHTML(i, rep){
+  rep=rep||{};
+  return '<div class="row" style="margin-bottom:8px;align-items:end">'+
+    '<div style="flex:0 0 44px;min-width:44px"><label class="fl">Rep</label>'+
+      '<div class="num" style="font-size:20px;font-weight:700;padding:8px 0">'+(i+1)+'</div></div>'+
+    '<div style="flex:1 1 110px"><label class="fl" for="rd'+i+'">Distance (m)</label>'+
+      '<input type="number" class="repd" id="rd'+i+'" inputmode="decimal" min="0" step="1" value="'+(rep.d!=null?rep.d:'')+'" placeholder="200"></div>'+
+    '<div style="flex:1 1 110px"><label class="fl" for="rt'+i+'">Time (s)</label>'+
+      '<input type="text" class="rept" id="rt'+i+'" inputmode="decimal" value="'+(rep.t!=null?rep.t:'')+'" placeholder="60"></div>'+
+    '<div style="flex:1 1 100px"><label class="fl">Pace</label>'+
+      '<div class="num small muted" id="rp'+i+'" style="padding:12px 0">—</div></div>'+
+  '</div>';
+}
+function renderRepRows(reps){
+  const box=$('#repRows'); let h='';
+  for(let i=0;i<state.repCount;i++) h+=repRowHTML(i, reps&&reps[i]);
+  box.innerHTML=h;
+  box.querySelectorAll('input').forEach(inp=>inp.addEventListener('input', onRepInput));
+  updateFade();
+}
+function onRepInput(){ updateFade(); }
+function readReps(){
+  const out=[];
+  for(let i=0;i<state.repCount;i++){
+    const d=num($('#rd'+i)?$('#rd'+i).value:'');
+    const t=parseTime($('#rt'+i)?$('#rt'+i).value:'');
+    out.push({d:d, t:t});
+  }
+  return out;
+}
+function updateFade(){
+  const reps=readReps();
+  reps.forEach((r,i)=>{
+    const el=$('#rp'+i); if(!el) return;
+    const m=repMetrics(r);
+    el.textContent = m ? (m.pace100.toFixed(1)+' s/100m') : '—';
+  });
+  const valid=reps.filter(r=>r.d>0&&r.t>0).map(repMetrics);
+  const box=$('#fadeBox');
+  if(!valid.length){
+    box.innerHTML='<p class="muted small" style="margin:0">Enter distance and time for at least one rep and the comparison appears here.</p>';
+    return;
+  }
+  const maxSpeed=Math.max.apply(null, valid.map(v=>v.speed));
+  let h='';
+  valid.forEach((v,i)=>{
+    const pct=maxSpeed>0 ? (v.speed/maxSpeed*100) : 0;
+    h+='<div class="fade-row">'+
+        '<div class="tag">REP '+(i+1)+'</div>'+
+        '<div class="fade-track"><div class="fade-fill'+(i>0?' second':'')+'" style="width:'+pct.toFixed(1)+'%"></div></div>'+
+        '<div class="val num">'+v.kmh.toFixed(2)+' km/h</div>'+
+      '</div>';
+  });
+  const first=valid[0].speed, last=valid[valid.length-1].speed;
+  const fade = valid.length>1 ? (first-last)/first*100 : null;
+  if(fade==null){
+    h+='<div class="fade-verdict"><div class="lbl">Add a second rep to get the fade figure — that is the point of the protocol.</div></div>';
+  }else{
+    const sign = fade>0?'−':'+';
+    h+='<div class="fade-verdict">'+
+        '<div class="big num" style="color:var(--'+(fadeClass(fade)==='good'?'ok':fadeClass(fade)==='mid'?'warn':'danger')+')">'+sign+Math.abs(fade).toFixed(1)+'%</div>'+
+        '<div class="lbl"><b>'+fadeWord(fade)+'</b><br>speed change, rep 1 → rep '+valid.length+'</div>'+
+      '</div>';
+  }
+  const tD=readReps().filter(r=>r.d>0&&r.t>0).reduce((a,r)=>a+r.d,0);
+  const tT=readReps().filter(r=>r.d>0&&r.t>0).reduce((a,r)=>a+r.t,0);
+  h+='<div class="formula"><b>How this is worked out.</b> Speed for a rep is its distance divided by its time. '+
+     'Fade is the first rep\'s speed minus the last rep\'s speed, divided by the first rep\'s speed, as a percentage — '+
+     'so 0% means you repeated it exactly, and a minus figure means you slowed. '+
+     'Pace is the seconds it would take you to cover 100 m at that speed. '+
+     'Session total: '+tD+' m in '+tT+' s.</div>';
+  box.innerHTML=h;
+}
+function resetForm(){
+  state.editingId=null; state.repCount=2;
+  $('#formTitle').textContent='New session';
+  $('#btnCancelEdit').hidden=true;
+  $('#btnSave').textContent='Save session';
+  $('#fDate').value=todayISO();
+  $('#fSurface').value=state.settings.defSurface||'Track';
+  $('#fLocation').value='';
+  $('#fRest').value=state.settings.defRest||180;
+  $('#fRpe').value=''; $('#fHrRest').value=''; $('#fHrPeak').value=''; $('#fNotes').value='';
+  const h=new Date().getHours();
+  const slot = h<11?'Morning' : h<16?'Afternoon' : h<21?'Evening':'Night';
+  setSlot(slot);
+  renderRepRows([{},{}]);
+}
+function setSlot(s){
+  $$('#segSlot button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.slot===s)));
+}
+function getSlot(){
+  const b=$('#segSlot').querySelector('button[aria-pressed="true"]');
+  return b?b.dataset.slot:'Morning';
+}
+function loadIntoForm(rec){
+  state.editingId=rec.id;
+  const d=rec.data;
+  state.repCount=Math.max(1, Math.min(MAX_REPS, (d.reps||[]).length||2));
+  $('#formTitle').textContent='Editing session';
+  $('#btnCancelEdit').hidden=false;
+  $('#btnSave').textContent='Save changes';
+  $('#fDate').value=d.date||todayISO();
+  setSlot(d.slot||'Morning');
+  $('#fSurface').value=d.surface||'Track';
+  $('#fLocation').value=d.location||'';
+  $('#fRest').value=d.restSec!=null?d.restSec:180;
+  $('#fRpe').value=d.rpe!=null?d.rpe:'';
+  $('#fHrRest').value=d.hrRest!=null?d.hrRest:'';
+  $('#fHrPeak').value=d.hrPeak!=null?d.hrPeak:'';
+  $('#fNotes').value=d.notes||'';
+  renderRepRows(d.reps||[]);
+  setView('viewLog');
+}
+async function saveSession(){
+  const reps=readReps().filter(r=>r.d>0 && r.t>0);
+  if(!reps.length){ toast('Add at least one rep with a distance and a time.'); return; }
+  const date=$('#fDate').value;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ toast('Pick a date.'); return; }
+  const data={
+    date:date, slot:getSlot(), surface:$('#fSurface').value, location:$('#fLocation').value.trim(),
+    restSec:num($('#fRest').value), reps:reps,
+    rpe:num($('#fRpe').value), hrRest:num($('#fHrRest').value), hrPeak:num($('#fHrPeak').value),
+    notes:$('#fNotes').value.trim()
+  };
+  if(state.editingId){
+    const rec=state.records.find(r=>r.id===state.editingId);
+    if(!rec){ toast('That session is gone.'); resetForm(); return; }
+    const changes=diffData(rec.data,data);
+    rec.data=data; rec.updatedAt=Date.now(); rec.rev=(rec.rev||1)+1;
+    await dbPut('records',rec);
+    if(changes.length){
+      await addLog({action:'edit', recordId:rec.id, source:'manual',
+        detail:changes.map(c=>c.field+': "'+c.from+'" → "'+c.to+'"').join('; ')});
+    }
+    toast('Session updated.');
+  }else{
+    const rec=newRecord('session',data,'manual');
+    state.records.push(rec);
+    await dbPut('records',rec);
+    await addLog({action:'create', recordId:rec.id, source:'manual', detail:data.date+' '+data.slot+' — '+repsText(reps)});
+    toast('Session saved.');
+  }
+  resetForm(); renderAll(); markDirty();
+}
+async function softDelete(id){
+  const rec=state.records.find(r=>r.id===id); if(!rec) return;
+  rec.deleted=true; rec.updatedAt=Date.now(); rec.rev=(rec.rev||1)+1;
+  await dbPut('records',rec);
+  await addLog({action:'delete', recordId:id, source:'manual', detail:rec.data.date+' '+rec.data.slot});
+  closeSheet(); renderAll(); markDirty(); toast('Session removed. It stays in the backup as a tombstone.');
+}
+
+/* ============================================================
+   RECENT + HISTORY
+   ============================================================ */
+function sessionLine(rec){
+  const s=sessionMetrics(rec);
+  const parts=s.reps.map((r,i)=>'R'+(i+1)+' '+r.d+' m / '+r.t+' s').join('  ·  ');
+  return parts || 'No complete reps';
+}
+function itemHTML(rec){
+  const s=sessionMetrics(rec);
+  const cls = (rec.data.slot==='Evening'||rec.data.slot==='Night') ? ' evening' : '';
+  const badge = s.fade==null ? '<span class="badge">1 rep</span>'
+    : '<span class="badge '+fadeClass(s.fade)+'">'+(s.fade>0?'−':'+')+Math.abs(s.fade).toFixed(1)+'%</span>';
+  return '<div class="item'+cls+'" data-id="'+rec.id+'">'+
+    '<div class="l1"><b>'+esc(rec.data.slot)+'</b>'+badge+'</div>'+
+    '<div class="l2 num">'+esc(sessionLine(rec))+'</div>'+
+    '<div class="l2">'+esc(rec.data.surface||'')+(rec.data.location?' · '+esc(rec.data.location):'')+
+      ' · <span class="tiny">'+fmtRel(s.eventAt)+'</span></div>'+
+  '</div>';
+}
+function renderRecent(){
+  const list=liveSessions().sort((a,b)=>sessionMetrics(b).eventAt-sessionMetrics(a).eventAt).slice(0,6);
+  const box=$('#recentList');
+  if(!list.length){
+    box.innerHTML='<div class="empty"><b>Nothing logged yet</b>Run the protocol, then save your first session — or open the Timer and let it run the clock for you.</div>';
+    return;
+  }
+  box.innerHTML=list.map(itemHTML).join('');
+  box.querySelectorAll('.item').forEach(el=>el.addEventListener('click',()=>showDetail(el.dataset.id)));
+}
+function filteredSessions(f){
+  return liveSessions().filter(rec=>{
+    const d=rec.data;
+    if(f.from && d.date < f.from) return false;
+    if(f.to && d.date > f.to) return false;
+    if(f.slot && d.slot!==f.slot) return false;
+    if(f.surface && d.surface!==f.surface) return false;
+    if(f.text){
+      const hay=((d.notes||'')+' '+(d.location||'')).toLowerCase();
+      if(hay.indexOf(f.text.toLowerCase())<0) return false;
+    }
+    return true;
+  }).sort((a,b)=>sessionMetrics(b).eventAt-sessionMetrics(a).eventAt);
+}
+function historyFilter(){
+  return { from:$('#hFrom').value, to:$('#hTo').value, slot:$('#hSlot').value, surface:$('#hSurface').value, text:$('#hText').value.trim() };
+}
+function renderHistory(){
+  const list=filteredSessions(historyFilter());
+  const sum=$('#historySummary');
+  if(!list.length){
+    sum.innerHTML='';
+    $('#historyList').innerHTML='<div class="empty"><b>No sessions match</b>Widen the dates or reset the filters.</div>';
+    return;
+  }
+  const ms=list.map(sessionMetrics);
+  const fades=ms.map(m=>m.fade).filter(v=>v!=null);
+  const totalD=ms.reduce((a,m)=>a+m.totalD,0);
+  const bestSpeed=Math.max.apply(null, ms.map(m=>m.best));
+  sum.innerHTML='<div class="card"><div class="stats">'+
+    stat('Sessions', list.length, '') +
+    stat('Distance', (totalD/1000).toFixed(2), 'km') +
+    stat('Avg fade', fades.length?(fades.reduce((a,b)=>a+b,0)/fades.length).toFixed(1):'—','%') +
+    stat('Best speed', bestSpeed?bestSpeed.toFixed(2):'—','m/s') +
+  '</div></div>';
+
+  let h='', lastDate='';
+  list.forEach(rec=>{
+    if(rec.data.date!==lastDate){
+      lastDate=rec.data.date;
+      h+='<div class="daygroup">'+esc(fmtDate(sessionMetrics(rec).eventAt))+'</div>';
+    }
+    h+=itemHTML(rec);
+  });
+  $('#historyList').innerHTML=h;
+  $('#historyList').querySelectorAll('.item').forEach(el=>el.addEventListener('click',()=>showDetail(el.dataset.id)));
+}
+function stat(k,v,u){
+  return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v num">'+esc(v)+' <span class="u">'+esc(u)+'</span></div></div>';
+}
+function showDetail(id){
+  const rec=state.records.find(r=>r.id===id); if(!rec) return;
+  const s=sessionMetrics(rec), d=rec.data;
+  let h='<h2 style="font-size:19px;margin-bottom:2px">'+esc(fmtDate(s.eventAt))+' · '+esc(d.slot)+'</h2>';
+  h+='<p class="small muted" style="margin:0 0 12px">'+esc(d.surface||'')+(d.location?' · '+esc(d.location):'')+
+      ' · rest '+(d.restSec!=null?d.restSec:'—')+' s</p>';
+  h+='<div class="tblwrap"><table><thead><tr><th>Rep</th><th class="n">Distance</th><th class="n">Time</th><th class="n">Speed</th><th class="n">Pace /100 m</th></tr></thead><tbody>';
+  s.reps.forEach((r,i)=>{
+    const m=repMetrics(r);
+    h+='<tr><td>'+(i+1)+'</td><td class="n">'+r.d+' m</td><td class="n">'+r.t+' s</td><td class="n">'+m.kmh.toFixed(2)+' km/h</td><td class="n">'+m.pace100.toFixed(1)+' s</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div class="stats" style="margin-top:12px">'+
+      stat('Fade', s.fade==null?'—':((s.fade>0?'−':'+')+Math.abs(s.fade).toFixed(1)),'%')+
+      stat('Total', s.totalD,'m')+
+      stat('RPE', d.rpe!=null?d.rpe:'—','/10')+
+      stat('Peak HR', d.hrPeak!=null?d.hrPeak:'—','bpm')+
+    '</div>';
+  if(d.notes) h+='<p class="small" style="margin-top:12px"><b>Notes.</b> '+esc(d.notes)+'</p>';
+  h+='<p class="tiny muted" style="margin-top:12px">Entered '+esc(fmtAbs(rec.createdAt))+' · last change '+esc(fmtAbs(rec.updatedAt))+
+     ' · revision '+rec.rev+' · '+esc(rec.source||'manual')+' · '+esc(rec.deviceId)+'</p>';
+  const entries=state.log.filter(l=>l.recordId===rec.id).sort((a,b)=>b.ts-a.ts);
+  if(entries.length){
+    h+='<p class="tiny muted" style="margin:6px 0 0"><b>Audit</b><br>'+
+      entries.map(e=>esc(fmtAbs(e.ts))+' — '+esc(e.action)+(e.detail?': '+esc(e.detail):'')).join('<br>')+'</p>';
+  }
+  h+='<div class="row" style="margin-top:16px">'+
+      '<button class="btn primary" id="shEdit">Edit</button>'+
+      '<button class="btn ghost" id="shCopy">Copy as TSV</button>'+
+      '<button class="btn danger" id="shDel">Delete</button>'+
+    '</div>';
+  openSheet(h);
+  $('#shEdit').addEventListener('click',()=>{ closeSheet(); loadIntoForm(rec); });
+  $('#shCopy').addEventListener('click',async()=>{ const ok=await copyText(recordsToTSV([rec])); toast(ok?'Row copied.':'Copy failed — select the text manually.'); });
+  $('#shDel').addEventListener('click',()=>{
+    if(confirm('Delete this session? It is kept as a tombstone so a backup cannot resurrect it.')) softDelete(rec.id);
+  });
+}
+
+/* ============================================================
+   CHARTS
+   ============================================================ */
+function lineChartSVG(series, xLabels, yFmt, yTitle){
+  const W=640, H=250, L=48, R=14, T=14, B=34;
+  const all=[];
+  series.forEach(s=>s.values.forEach(v=>{ if(v!=null && isFinite(v)) all.push(v); }));
+  if(!all.length) return '<p class="muted small">Not enough data yet.</p>';
+  let min=Math.min.apply(null,all), max=Math.max.apply(null,all);
+  if(min===max){ min=min-1; max=max+1; }
+  const padr=(max-min)*0.12; min-=padr; max+=padr;
+  const n=Math.max(1, xLabels.length);
+  const x=i=> n===1 ? (L+(W-L-R)/2) : (L + i*(W-L-R)/(n-1));
+  const y=v=> T + (max-v)/(max-min)*(H-T-B);
+  let g='';
+  for(let k=0;k<=4;k++){
+    const v=min+(max-min)*k/4, yy=y(v);
+    g+='<line class="grid" x1="'+L+'" y1="'+yy.toFixed(1)+'" x2="'+(W-R)+'" y2="'+yy.toFixed(1)+'"/>';
+    g+='<text class="axis" x="'+(L-6)+'" y="'+(yy+4).toFixed(1)+'" text-anchor="end">'+esc(yFmt(v))+'</text>';
+  }
+  let lines='', dots='';
+  series.forEach((s,si)=>{
+    const cls = si===0?'s1':'s2';
+    let seg=[], segs=[];
+    s.values.forEach((v,i)=>{
+      if(v==null||!isFinite(v)){ if(seg.length) segs.push(seg); seg=[]; return; }
+      seg.push(x(i).toFixed(1)+','+y(v).toFixed(1));
+      dots+='<circle class="'+cls+'d" cx="'+x(i).toFixed(1)+'" cy="'+y(v).toFixed(1)+'" r="2.6"/>';
+    });
+    if(seg.length) segs.push(seg);
+    segs.forEach(sg=>{ if(sg.length>1) lines+='<polyline class="'+cls+'" points="'+sg.join(' ')+'"/>'; });
+  });
+  let xt='';
+  const step=Math.max(1, Math.ceil(n/5));
+  for(let i=0;i<n;i+=step){
+    xt+='<text class="axis" x="'+x(i).toFixed(1)+'" y="'+(H-12)+'" text-anchor="middle">'+esc(xLabels[i])+'</text>';
+  }
+  if(n>1) xt+='<text class="axis" x="'+x(n-1).toFixed(1)+'" y="'+(H-12)+'" text-anchor="end">'+esc(xLabels[n-1])+'</text>';
+  const yl = yTitle ? '<text class="axis" x="4" y="12">'+esc(yTitle)+'</text>' : '';
+  return '<svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" role="img">'+g+yl+lines+dots+xt+'</svg>';
+}
+function chartData(days){
+  let list=liveSessions().map(r=>({rec:r, m:sessionMetrics(r)}));
+  if(days>0){
+    const cut=Date.now()-days*86400000;
+    list=list.filter(o=>o.m.eventAt>=cut);
+  }
+  return list.sort((a,b)=>a.m.eventAt-b.m.eventAt);
+}
+function shortDate(ms){ const d=new Date(ms); return pad2(d.getDate())+'/'+pad2(d.getMonth()+1); }
+function renderCharts(){
+  const box=$('#chartsOut'); if(!box) return;
+  const list=chartData(state.chartDays);
+  if(!list.length){
+    box.innerHTML='<div class="empty"><b>No sessions in this range</b>Log a couple of sessions and the trend lines appear here.</div>';
+    return;
+  }
+  const labels=list.map(o=>shortDate(o.m.eventAt));
+  let h='';
+
+  if(!state.chartSplit){
+    h+='<div class="card"><h2>Rep speed over time</h2><div class="chartbox">'+
+      lineChartSVG([
+        {values:list.map(o=>o.m.m[0]?o.m.m[0].kmh:null)},
+        {values:list.map(o=>o.m.m.length>1?o.m.m[o.m.m.length-1].kmh:null)}
+      ], labels, v=>v.toFixed(1), 'km/h')+
+      '</div><div class="legend"><span><i class="a"></i>First rep</span><span><i class="b"></i>Last rep</span></div></div>';
+
+    h+='<div class="card"><h2>Fade — lower is fitter</h2><div class="chartbox">'+
+      lineChartSVG([{values:list.map(o=>o.m.fade)}], labels, v=>v.toFixed(0)+'%', '% slower')+
+      '</div><p class="tiny muted" style="margin:8px 0 0">A flat line near zero means you can repeat the effort. A line drifting upwards means the second rep is costing you more than it used to.</p></div>';
+  }else{
+    const morn=list.filter(o=>o.rec.data.slot==='Morning'||o.rec.data.slot==='Afternoon');
+    const eve =list.filter(o=>o.rec.data.slot==='Evening'||o.rec.data.slot==='Night');
+    const allDates=[]; const key=o=>o.rec.data.date;
+    list.forEach(o=>{ if(allDates.indexOf(key(o))<0) allDates.push(key(o)); });
+    const pick=(arr,d,fn)=>{ const f=arr.find(o=>key(o)===d); return f?fn(f):null; };
+    h+='<div class="card"><h2>First-rep speed — morning vs evening</h2><div class="chartbox">'+
+      lineChartSVG([
+        {values:allDates.map(d=>pick(morn,d,o=>o.m.m[0]?o.m.m[0].kmh:null))},
+        {values:allDates.map(d=>pick(eve ,d,o=>o.m.m[0]?o.m.m[0].kmh:null))}
+      ], allDates.map(d=>d.slice(5).replace('-','/')), v=>v.toFixed(1), 'km/h')+
+      '</div><div class="legend"><span><i class="a"></i>Morning</span><span><i class="b"></i>Evening</span></div></div>';
+
+    const avg=arr=>{ const v=arr.map(o=>o.m.fade).filter(x=>x!=null); return v.length? v.reduce((a,b)=>a+b,0)/v.length : null; };
+    const am=avg(morn), pm=avg(eve);
+    const mx=Math.max(am||0,pm||0,1);
+    h+='<div class="card"><h2>Average fade by session</h2><div class="hbars">'+
+      '<div class="hbar"><span>Morning</span><div class="t"><div style="width:'+((am||0)/mx*100).toFixed(1)+'%"></div></div><span class="num">'+(am==null?'—':am.toFixed(1)+'%')+'</span></div>'+
+      '<div class="hbar b"><span>Evening</span><div class="t"><div style="width:'+((pm||0)/mx*100).toFixed(1)+'%"></div></div><span class="num">'+(pm==null?'—':pm.toFixed(1)+'%')+'</span></div>'+
+      '</div><p class="tiny muted" style="margin:8px 0 0">'+morn.length+' morning sessions, '+eve.length+' evening.</p></div>';
+  }
+
+  h+='<div class="card"><h2>Session distance</h2><div class="chartbox">'+
+    lineChartSVG([{values:list.map(o=>o.m.totalD)}], labels, v=>Math.round(v), 'metres')+'</div></div>';
+
+  const rpe=list.map(o=>o.rec.data.rpe!=null?o.rec.data.rpe:null);
+  if(rpe.some(v=>v!=null)){
+    h+='<div class="card"><h2>Effort (RPE)</h2><div class="chartbox">'+
+      lineChartSVG([{values:rpe}], labels, v=>v.toFixed(0), '1–10')+'</div></div>';
+  }
+  box.innerHTML=h;
+}
+
+/* ============================================================
+   TIMER
+   ============================================================ */
+const timer = { on:false, mode:'time', reps:2, runSec:60, restSec:180, idx:0, phase:'idle',
+                phaseStart:0, phaseLen:0, results:[], tick:null, wake:null };
+let actx=null;
+function beep(freq,dur,vol){
+  if(!state.settings.sound) return;
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state==='suspended') actx.resume();
+    const o=actx.createOscillator(), g=actx.createGain();
+    o.type='sine'; o.frequency.value=freq||880;
+    o.connect(g); g.connect(actx.destination);
+    g.gain.setValueAtTime(vol||0.25, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+(dur||0.16));
+    o.start(); o.stop(actx.currentTime+(dur||0.16)+0.02);
+  }catch(e){}
+}
+function buzz(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+async function askWake(){
+  try{ if('wakeLock' in navigator){ timer.wake=await navigator.wakeLock.request('screen'); } }catch(e){}
+}
+function dropWake(){ try{ if(timer.wake){ timer.wake.release(); timer.wake=null; } }catch(e){} }
+
+function timerStart(){
+  timer.mode = $('#segMode').querySelector('button[aria-pressed="true"]').dataset.mode;
+  timer.reps = Math.max(1, Math.min(MAX_REPS, num($('#tReps').value)||2));
+  timer.runSec = Math.max(5, num($('#tRun').value)||60);
+  timer.restSec = Math.max(5, num($('#tRest').value)||180);
+  timer.results=[]; timer.idx=0; timer.on=true;
+  $('#btnTimerStart').hidden=true; $('#btnTimerStop').hidden=false;
+  askWake();
+  beep(660,0.12);
+  setPhase('lead', 5);
+  timer.tick=setInterval(timerTick, 100);
+}
+function setPhase(p, len){
+  timer.phase=p; timer.phaseStart=Date.now(); timer.phaseLen=len;
+  timer._lastBeep=-1;
+  const clock=$('#tClock'), prog=$('#tProgWrap');
+  clock.classList.toggle('run', p==='run'||p==='lead');
+  clock.classList.toggle('rest', p==='rest');
+  prog.classList.toggle('rest', p==='rest');
+  $('#btnTimerLap').hidden = !(p==='run' && timer.mode==='dist');
+  const names={lead:'Get ready', run:'Run', rest:'Rest', done:'Done'};
+  $('#tPhase').textContent=names[p]||'Ready';
+  $('#tSub').textContent = p==='done' ? 'Session complete' : ('Rep '+Math.min(timer.idx+1,timer.reps)+' of '+timer.reps);
+  if(p==='run'){ beep(1046,0.22,0.3); buzz([120,60,120]); }
+  if(p==='rest'){ beep(440,0.3,0.28); buzz(200); }
+}
+function timerTick(){
+  if(!timer.on) return;
+  const el=(Date.now()-timer.phaseStart)/1000;
+  if(timer.phase==='run' && timer.mode==='dist'){
+    $('#tClock').textContent=mmss(el);
+    $('#tProg').style.width='0%';
+    return;
+  }
+  const left=Math.max(0, timer.phaseLen-el);
+  $('#tClock').textContent=mmss(left);
+  $('#tProg').style.width=Math.min(100,(el/timer.phaseLen*100)).toFixed(1)+'%';
+  const w=Math.ceil(left);
+  if(w<=3 && w>0 && w!==timer._lastBeep){ timer._lastBeep=w; beep(760,0.09,0.2); }
+  if(left<=0) nextPhase(timer.phaseLen);
+}
+function nextPhase(runTime){
+  if(timer.phase==='lead'){ setPhase('run', timer.runSec); return; }
+  if(timer.phase==='run'){
+    timer.results.push({ t: Math.round(runTime), d: (timer.mode==='time'? null : (state.settings.defDist||200)) });
+    timer.idx++;
+    if(timer.idx>=timer.reps){ timerFinish(); return; }
+    setPhase('rest', timer.restSec); return;
+  }
+  if(timer.phase==='rest'){ setPhase('run', timer.runSec); return; }
+}
+function timerLap(){
+  if(timer.phase!=='run' || timer.mode!=='dist') return;
+  const el=(Date.now()-timer.phaseStart)/1000;
+  nextPhase(el);
+}
+function timerFinish(){
+  timer.on=false; clearInterval(timer.tick); dropWake();
+  setPhase('done',1);
+  $('#tClock').textContent='—'; $('#tProg').style.width='100%';
+  $('#btnTimerStart').hidden=false; $('#btnTimerStop').hidden=true; $('#btnTimerLap').hidden=true;
+  beep(880,0.14); setTimeout(()=>beep(1174,0.3),180); buzz([200,80,200,80,300]);
+  state.repCount=Math.max(1,Math.min(MAX_REPS,timer.results.length));
+  const reps=timer.results.map(r=>({ d: r.d, t: r.t }));
+  state.editingId=null;
+  $('#formTitle').textContent='New session — from timer';
+  $('#fDate').value=todayISO();
+  $('#fRest').value=timer.restSec;
+  renderRepRows(reps);
+  toast(timer.mode==='time' ? 'Times recorded — enter the distances.' : 'Times recorded — check the distances.');
+  setTimeout(()=>setView('viewLog'), 700);
+}
+function timerStop(){
+  timer.on=false; clearInterval(timer.tick); dropWake();
+  timer.phase='idle';
+  $('#tPhase').textContent='Stopped'; $('#tClock').textContent='00:00'; $('#tSub').textContent='Rep 0 of '+timer.reps;
+  $('#tProg').style.width='0%';
+  $('#btnTimerStart').hidden=false; $('#btnTimerStop').hidden=true; $('#btnTimerLap').hidden=true;
+  if(timer.results.length){
+    state.repCount=Math.max(1,Math.min(MAX_REPS,timer.results.length));
+    renderRepRows(timer.results.map(r=>({d:r.d,t:r.t})));
+    toast('Stopped. '+timer.results.length+' rep(s) carried to the log form.');
+  }
+}
+
+/* ============================================================
+   IMPORT / EXPORT — columns, TSV/CSV, merge
+   ============================================================ */
+const COLUMNS=[
+  {name:'id',            key:'id',       type:'text', req:false},
+  {name:'Date',          key:'date',     type:'date', req:true},
+  {name:'Session',       key:'slot',     type:'enum', req:true,  enum:SLOTS},
+  {name:'Surface',       key:'surface',  type:'enum', req:false, enum:SURFACES},
+  {name:'Location',      key:'location', type:'text', req:false},
+  {name:'Rest sec',      key:'restSec',  type:'num',  req:false},
+  {name:'Rep1 dist m',   key:'r1d', type:'num', req:true},
+  {name:'Rep1 time s',   key:'r1t', type:'time',req:true},
+  {name:'Rep2 dist m',   key:'r2d', type:'num', req:false},
+  {name:'Rep2 time s',   key:'r2t', type:'time',req:false},
+  {name:'Rep3 dist m',   key:'r3d', type:'num', req:false},
+  {name:'Rep3 time s',   key:'r3t', type:'time',req:false},
+  {name:'Rep4 dist m',   key:'r4d', type:'num', req:false},
+  {name:'Rep4 time s',   key:'r4t', type:'time',req:false},
+  {name:'RPE',           key:'rpe',    type:'num', req:false},
+  {name:'Resting HR',    key:'hrRest', type:'num', req:false},
+  {name:'Peak HR',       key:'hrPeak', type:'num', req:false},
+  {name:'Notes',         key:'notes',  type:'text',req:false}
+];
+function normHeader(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+const HEADER_ALIASES={};
+COLUMNS.forEach(c=>{ HEADER_ALIASES[normHeader(c.name)]=c.key; });
+['rep1distance','rep1m','r1distance'].forEach(a=>HEADER_ALIASES[a]='r1d');
+['rep1time','rep1s','r1time'].forEach(a=>HEADER_ALIASES[a]='r1t');
+['rep2distance','rep2m'].forEach(a=>HEADER_ALIASES[a]='r2d');
+['rep2time','rep2s'].forEach(a=>HEADER_ALIASES[a]='r2t');
+['rep3distance'].forEach(a=>HEADER_ALIASES[a]='r3d');
+['rep3time'].forEach(a=>HEADER_ALIASES[a]='r3t');
+['rep4distance'].forEach(a=>HEADER_ALIASES[a]='r4d');
+['rep4time'].forEach(a=>HEADER_ALIASES[a]='r4t');
+HEADER_ALIASES['timeofday']='slot'; HEADER_ALIASES['sessiontime']='slot'; HEADER_ALIASES['slot']='slot';
+HEADER_ALIASES['rest']='restSec'; HEADER_ALIASES['restseconds']='restSec';
+HEADER_ALIASES['effort']='rpe'; HEADER_ALIASES['note']='notes'; HEADER_ALIASES['place']='location';
+
+function parseCSV(text){
+  text=String(text).replace(/^\uFEFF/,'');
+  const rows=[]; let row=[], cell='', i=0, inQ=false;
+  while(i<text.length){
+    const c=text[i];
+    if(inQ){
+      if(c==='"'){
+        if(text[i+1]==='"'){ cell+='"'; i+=2; continue; }
+        inQ=false; i++; continue;
+      }
+      cell+=c; i++; continue;
+    }
+    if(c==='"'){ inQ=true; i++; continue; }
+    if(c===','){ row.push(cell); cell=''; i++; continue; }
+    if(c==='\r'){ i++; continue; }
+    if(c==='\n'){ row.push(cell); rows.push(row); row=[]; cell=''; i++; continue; }
+    cell+=c; i++;
+  }
+  if(cell.length || row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.some(x=>String(x).trim()!==''));
+}
+function parseTSV(text){
+  return String(text).replace(/^\uFEFF/,'').replace(/\r/g,'').split('\n')
+    .filter(l=>l.trim()!=='').map(l=>l.split('\t'));
+}
+function detectAndParse(text){
+  const t=String(text).trim();
+  if(!t) return {kind:'empty'};
+  if(t[0]==='[' || t[0]==='{'){
+    try{
+      const j=JSON.parse(t);
+      const arr=Array.isArray(j)?j:(j.records||[]);
+      return {kind:'json', rows:arr};
+    }catch(e){ return {kind:'error', message:'That looked like JSON but would not parse: '+e.message}; }
+  }
+  const firstLine=t.split('\n')[0];
+  if(firstLine.indexOf('\t')>-1) return {kind:'table', rows:parseTSV(t)};
+  if(firstLine.indexOf(',')>-1) return {kind:'table', rows:parseCSV(t)};
+  return {kind:'error', message:'No tab or comma separators found. Paste a header row plus data rows.'};
+}
+function excelSerialToISO(n){
+  const ms=Math.round((n-25569)*86400000);
+  const d=new Date(ms);
+  return d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate());
+}
+function mapHeaders(headerRow){
+  return headerRow.map(h=>{
+    const k=HEADER_ALIASES[normHeader(h)];
+    return { raw:String(h).trim(), key:k||null };
+  });
+}
+function validateRow(vals, cols){
+  const rec={ _errors:[], _warnings:[], _fields:{} };
+  cols.forEach((c,i)=>{
+    if(!c.key) return;
+    rec._fields[c.key]=(vals[i]==null?'':String(vals[i])).trim();
+  });
+  const f=rec._fields;
+  COLUMNS.forEach(spec=>{
+    const raw=f[spec.key]==null?'':f[spec.key];
+    if(raw==='?'){ rec._warnings.push(spec.name+' left unresolved'); return; }
+    if(raw===''){
+      if(spec.req && spec.key!=='id') rec._errors.push(spec.name+' is required');
+      return;
+    }
+    if(spec.type==='date'){
+      let v=raw;
+      if(/^\d+(\.\d+)?$/.test(v) && Number(v)>20000 && Number(v)<80000) v=excelSerialToISO(Number(v));
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(v)) rec._errors.push(spec.name+' must be YYYY-MM-DD, got "'+raw+'"');
+      else f[spec.key]=v;
+    }else if(spec.type==='enum'){
+      const hit=spec.enum.find(e=>e.toLowerCase()===raw.toLowerCase());
+      if(!hit) rec._errors.push(spec.name+' must be one of: '+spec.enum.join(', '));
+      else f[spec.key]=hit;
+    }else if(spec.type==='num'){
+      const n=Number(raw);
+      if(!isFinite(n)) rec._errors.push(spec.name+' is not a number');
+      else if(spec.key==='rpe' && (n<1||n>10)) rec._errors.push('RPE must be 1–10');
+    }else if(spec.type==='time'){
+      const n=parseTime(raw);
+      if(n==null||!isFinite(n)||n<=0) rec._errors.push(spec.name+' is not a time');
+      else f[spec.key]=String(n);
+    }
+  });
+  for(let k=1;k<=MAX_REPS;k++){
+    const d=f['r'+k+'d'], t=f['r'+k+'t'];
+    const hasD=d && d!=='?' , hasT=t && t!=='?';
+    if(hasD!==hasT && (hasD||hasT)) rec._warnings.push('Rep '+k+' has only one of distance and time — it will be skipped');
+  }
+  if(f.id){
+    const ex=state.records.find(r=>r.id===f.id);
+    if(!ex) rec._warnings.push('id not found on this device — a new session will be created with it');
+  }else{
+    const dup=liveSessions().find(r=>r.data.date===f.date && r.data.slot===f.slot);
+    if(dup) rec._warnings.push('A session already exists for '+f.date+' '+f.slot+' — this will be added as a second one');
+  }
+  return rec;
+}
+function rowToData(f){
+  const reps=[];
+  for(let k=1;k<=MAX_REPS;k++){
+    const d=num(f['r'+k+'d']), t=parseTime(f['r'+k+'t']);
+    if(d>0 && t>0) reps.push({d:d,t:t});
+  }
+  return {
+    date:f.date, slot:f.slot, surface:f.surface||'', location:f.location||'',
+    restSec:num(f.restSec), reps:reps, rpe:num(f.rpe), hrRest:num(f.hrRest), hrPeak:num(f.hrPeak),
+    notes:(f.notes==='?'?'':(f.notes||''))
+  };
+}
+
+/* ---------- import stage rendering ---------- */
+function renderImportStage(){
+  const st=$('#importStage');
+  if(!state.importRows){ st.innerHTML=''; return; }
+  const rows=state.importRows, cols=state.importCols;
+  const unmapped=cols.filter(c=>!c.key);
+  let h='';
+
+  if(unmapped.length){
+    h+='<div class="card"><h2>Match the columns</h2><p class="small muted" style="margin:0 0 10px">These headers were not recognised. Point each one at a field, or leave it as Ignore.</p>';
+    cols.forEach((c,i)=>{
+      if(c.key) return;
+      h+='<div class="row" style="margin-bottom:8px;align-items:center">'+
+         '<div style="flex:1 1 120px" class="small"><b>'+esc(c.raw||'(blank)')+'</b></div>'+
+         '<div style="flex:1 1 160px"><select class="mapsel" data-i="'+i+'"><option value="">Ignore</option>'+
+           COLUMNS.map(sp=>'<option value="'+sp.key+'">'+esc(sp.name)+'</option>').join('')+
+         '</select></div></div>';
+    });
+    h+='<button class="btn" id="btnApplyMap">Apply mapping</button></div>';
+  }
+
+  const errs=rows.filter(r=>r._errors.length).length;
+  const warns=rows.filter(r=>!r._errors.length && r._warnings.length).length;
+  const ok=rows.length-errs-warns;
+  const newN=rows.filter(r=>!r._errors.length && !r._fields.id).length;
+  const updN=rows.filter(r=>!r._errors.length && r._fields.id).length;
+
+  h+='<div class="card"><h2>Dry run</h2><div class="stats">'+
+      stat('New', newN, 'rows')+stat('Updates', updN, 'rows')+
+      stat('Warnings', warns, '')+stat('Errors', errs, '')+
+    '</div>'+
+    '<p class="small muted" style="margin:10px 0 0">Nothing is written until you press Import. Fix a red cell directly in the table below and press Re-check.</p>'+
+    '<div class="row" style="margin-top:10px">'+
+      '<button class="btn" id="btnRecheck">Re-check</button>'+
+      '<button class="btn primary" id="btnDoImport"'+(rows.length-errs>0?'':' disabled')+'>Import '+(rows.length-errs)+' row(s)</button>'+
+      '<button class="btn ghost" id="btnCancelImport">Cancel</button>'+
+    '</div></div>';
+
+  h+='<div class="card"><h2>Rows</h2><div class="tblwrap"><table><thead><tr><th>#</th><th>Status</th>'+
+     COLUMNS.map(c=>'<th>'+esc(c.name)+'</th>').join('')+'</tr></thead><tbody>';
+  rows.forEach((r,i)=>{
+    const cls=r._errors.length?'err':(r._warnings.length?'warnrow':'');
+    const msg=r._errors.length? r._errors.join('; ') : (r._warnings.length? r._warnings.join('; ') : 'OK');
+    h+='<tr class="'+cls+'"><td class="n">'+(i+1)+'</td><td class="tiny">'+esc(msg)+'</td>'+
+       COLUMNS.map(c=>'<td><input class="cellin impcell" data-r="'+i+'" data-k="'+c.key+'" value="'+esc(r._fields[c.key]||'')+'"></td>').join('')+
+       '</tr>';
+  });
+  h+='</tbody></table></div></div>';
+  st.innerHTML=h;
+
+  const bm=$('#btnApplyMap');
+  if(bm) bm.addEventListener('click',()=>{
+    $$('.mapsel').forEach(sel=>{ const i=Number(sel.dataset.i); state.importCols[i].key=sel.value||null; });
+    const map={}; state.importCols.forEach(c=>{ if(c.key) map[normHeader(c.raw)]=c.key; });
+    state.settings.colMap=map; saveSettings();
+    revalidateFromRaw();
+  });
+  $('#btnRecheck').addEventListener('click',()=>{
+    $$('.impcell').forEach(inp=>{ state.importRows[Number(inp.dataset.r)]._fields[inp.dataset.k]=inp.value.trim(); });
+    state.importRows=state.importRows.map(r=>{
+      const vals=COLUMNS.map(c=>r._fields[c.key]||'');
+      const cols=COLUMNS.map(c=>({raw:c.name,key:c.key}));
+      return validateRow(vals, cols);
+    });
+    state.importCols=COLUMNS.map(c=>({raw:c.name,key:c.key}));
+    renderImportStage();
+  });
+  $('#btnCancelImport').addEventListener('click',()=>{ state.importRows=null; state.importCols=null; renderImportStage(); toast('Import cancelled. Nothing was written.'); });
+  $('#btnDoImport').addEventListener('click', doImport);
+}
+function revalidateFromRaw(){
+  if(!state.importRawRows) return;
+  const cols=state.importCols;
+  state.importRows=state.importRawRows.map(v=>validateRow(v, cols));
+  renderImportStage();
+}
+function stageTable(rows){
+  if(rows.length<1){ toast('Nothing to read.'); return; }
+  let header=rows[0], body=rows.slice(1);
+  let cols=mapHeaders(header);
+  const recognised=cols.filter(c=>c.key).length;
+  if(recognised===0){
+    /* maybe there was no header row — assume template order */
+    cols=COLUMNS.map(c=>({raw:c.name,key:c.key}));
+    body=rows;
+  }
+  if(state.settings.colMap){
+    cols=cols.map(c=>c.key?c:({raw:c.raw, key:state.settings.colMap[normHeader(c.raw)]||null}));
+  }
+  body=body.filter(r=>{
+    const idIdx=cols.findIndex(c=>c.key==='id');
+    const v=idIdx>=0? String(r[idIdx]||'').trim().toUpperCase() : '';
+    return v!=='EXAMPLE';
+  });
+  if(!body.length){ toast('Only the header (and examples) were found.'); return; }
+  state.importRawRows=body;
+  state.importCols=cols;
+  state.importRows=body.map(v=>validateRow(v, cols));
+  renderImportStage();
+  $('#importStage').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function stageJSON(arr){
+  const rows=arr.map(o=>{
+    const src=(o && o.data) ? Object.assign({id:o.id}, o.data) : (o||{});
+    const f={};
+    f.id=src.id||''; f.date=src.date||''; f.slot=src.slot||''; f.surface=src.surface||'';
+    f.location=src.location||''; f.restSec=src.restSec!=null?String(src.restSec):'';
+    (src.reps||[]).slice(0,MAX_REPS).forEach((r,i)=>{ f['r'+(i+1)+'d']=r.d!=null?String(r.d):''; f['r'+(i+1)+'t']=r.t!=null?String(r.t):''; });
+    f.rpe=src.rpe!=null?String(src.rpe):''; f.hrRest=src.hrRest!=null?String(src.hrRest):'';
+    f.hrPeak=src.hrPeak!=null?String(src.hrPeak):''; f.notes=src.notes||'';
+    return COLUMNS.map(c=>f[c.key]||'');
+  });
+  state.importRawRows=rows;
+  state.importCols=COLUMNS.map(c=>({raw:c.name,key:c.key}));
+  state.importRows=rows.map(v=>validateRow(v, state.importCols));
+  renderImportStage();
+}
+async function doImport(){
+  const rows=state.importRows.filter(r=>!r._errors.length);
+  if(!rows.length){ toast('No clean rows to import.'); return; }
+  const batchId=uuid(), now=Date.now();
+  const created=[], updatedPrev=[], toWrite=[];
+  const aiLike = (state.importSource==='paste');
+  rows.forEach(r=>{
+    const f=r._fields;
+    const data=rowToData(f);
+    if(!data.reps.length) return;
+    let rec = f.id ? state.records.find(x=>x.id===f.id) : null;
+    if(rec){
+      updatedPrev.push(JSON.parse(JSON.stringify(rec)));
+      rec.data=data; rec.updatedAt=now; rec.rev=(rec.rev||1)+1;
+      rec.deleted=false; rec.importBatchId=batchId;
+      toWrite.push(rec);
+    }else{
+      rec=newRecord('session', data, aiLike?'ai-entry':'import');
+      if(f.id) rec.id=f.id;
+      rec.importBatchId=batchId;
+      state.records.push(rec); created.push(rec.id); toWrite.push(rec);
+    }
+  });
+  await dbBulkPut('records', toWrite);
+  await addLog({ action:'import', batchId:batchId, source:aiLike?'ai-entry':'import',
+                 detail:created.length+' new, '+updatedPrev.length+' updated',
+                 created:created, prev:updatedPrev });
+  state.importRows=null; state.importCols=null; state.importRawRows=null; state.importSource=null;
+  $('#pasteBox').value='';
+  renderImportStage(); renderAll(); markDirty();
+  toast(created.length+' new, '+updatedPrev.length+' updated. Undo is in Settings.');
+}
+async function undoBatch(batchId){
+  const entry=state.log.find(l=>l.batchId===batchId && l.action==='import');
+  if(!entry){ toast('That batch is no longer in the log.'); return; }
+  if(!confirm('Undo this import? '+(entry.created||[]).length+' created session(s) will be removed and '+(entry.prev||[]).length+' restored to their previous values.')) return;
+  const delIds=entry.created||[];
+  await dbBulkDel('records', delIds);
+  state.records=state.records.filter(r=>delIds.indexOf(r.id)<0);
+  const prev=entry.prev||[];
+  if(prev.length){
+    await dbBulkPut('records', prev);
+    prev.forEach(p=>{ const i=state.records.findIndex(r=>r.id===p.id); if(i>=0) state.records[i]=p; else state.records.push(p); });
+  }
+  await addLog({action:'undo-import', batchId:batchId, detail:'reverted '+delIds.length+' created, '+prev.length+' restored'});
+  renderAll(); renderSettings(); markDirty(); toast('Import undone.');
+}
+
+/* ---------- TSV / CSV out ---------- */
+function recordToRow(rec){
+  const d=rec.data, f=[rec.id, d.date, d.slot, d.surface||'', d.location||'', d.restSec!=null?d.restSec:''];
+  for(let k=0;k<MAX_REPS;k++){
+    const r=(d.reps||[])[k];
+    f.push(r?r.d:''); f.push(r?r.t:'');
+  }
+  f.push(d.rpe!=null?d.rpe:''); f.push(d.hrRest!=null?d.hrRest:''); f.push(d.hrPeak!=null?d.hrPeak:'');
+  f.push((d.notes||'').replace(/[\t\r\n]+/g,' '));
+  return f;
+}
+function recordsToTSV(list){
+  const head=COLUMNS.map(c=>c.name).join('\t');
+  return head+'\n'+list.map(r=>recordToRow(r).join('\t')).join('\n');
+}
+function csvCell(v){
+  const s=String(v==null?'':v);
+  return /[",\r\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function recordsToCSV(list){
+  const head=COLUMNS.map(c=>csvCell(c.name)).join(',');
+  return head+'\r\n'+list.map(r=>recordToRow(r).map(csvCell).join(',')).join('\r\n');
+}
+function templateCSV(){
+  const head=COLUMNS.map(c=>csvCell(c.name)).join(',');
+  const ex1=['EXAMPLE','2026-08-10','Morning','Track','Main deck','180','200','60','200','63','','','','','7','58','176','Calm, felt strong'];
+  const ex2=['EXAMPLE','2026-08-10','Evening','Road','Seafront','180','195','60','188','60','','','','','8','60','181','Windy on the second rep'];
+  return head+'\r\n'+ex1.map(csvCell).join(',')+'\r\n'+ex2.map(csvCell).join(',')+'\r\n';
+}
+function aiSchemaText(){
+  const L=[];
+  L.push('APP: '+APP.name+' (schemaVersion '+APP.schemaVersion+') — repeat-sprint interval log.');
+  L.push('Reply with TSV only: header row then data rows. No commentary, no code fences.');
+  L.push('');
+  L.push('COLUMNS (exact names, this order):');
+  L.push('id            text    optional  leave blank for new sessions');
+  L.push('Date          date    REQUIRED  ISO YYYY-MM-DD — this is the event date');
+  L.push('Session       enum    REQUIRED  '+SLOTS.join(' | '));
+  L.push('Surface       enum    optional  '+SURFACES.join(' | '));
+  L.push('Location      text    optional');
+  L.push('Rest sec      number  optional  rest between reps in seconds (usually 180)');
+  L.push('Rep1 dist m   number  REQUIRED  metres covered in rep 1');
+  L.push('Rep1 time s   number  REQUIRED  seconds of rep 1');
+  L.push('Rep2 dist m   number  optional');
+  L.push('Rep2 time s   number  optional');
+  L.push('Rep3 dist m   number  optional');
+  L.push('Rep3 time s   number  optional');
+  L.push('Rep4 dist m   number  optional');
+  L.push('Rep4 time s   number  optional');
+  L.push('RPE           number  optional  1-10 whole number');
+  L.push('Resting HR    number  optional  bpm');
+  L.push('Peak HR       number  optional  bpm');
+  L.push('Notes         text    optional');
+  L.push('');
+  L.push('EXAMPLE ROW (tab separated, id left blank):');
+  L.push('\t2026-08-10\tMorning\tTrack\tMain deck\t180\t200\t60\t200\t63\t\t\t\t\t7\t58\t176\tCalm, felt strong');
+  L.push('');
+  L.push('RULES: never invent a value — unknown or unclear goes in as an empty cell or ?.');
+  L.push('Use only the enum values listed. Dates resolved against today. One row per session.');
+  L.push('Do not supply createdAt, rev or deviceId — the app fills those.');
+  L.push('Finish with a single final line: ROWS: n');
+  return L.join('\n');
+}
+
+/* ---------- backup: export / merge import ---------- */
+function buildBackup(){
+  return {
+    app:APP.id, appName:APP.name, appVersion:APP.version, schemaVersion:APP.schemaVersion,
+    exportedAt:isoDT(Date.now()), exportedAtMs:Date.now(), deviceId:state.deviceId,
+    meta:{ settings:state.settings, createdAt:null },
+    records:state.records, log:state.log
+  };
+}
+function backupName(ext){
+  const d=new Date();
+  return APP.id+'-backup-'+d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'-'+pad2(d.getHours())+pad2(d.getMinutes())+'.'+(ext||'json');
+}
+async function exportJSON(){
+  const txt=JSON.stringify(buildBackup(),null,2);
+  download(backupName('json'), txt, 'application/json');
+  state.lastExportAt=Date.now(); await metaSet('lastExportAt', state.lastExportAt);
+  state.dirtySinceExport=false; renderChipbar(); renderSettings();
+  toast('Backup downloaded.');
+}
+async function exportCSV(){
+  download(APP.id+'-sessions-'+todayISO()+'.csv', recordsToCSV(liveSessions().sort((a,b)=>sessionMetrics(a).eventAt-sessionMetrics(b).eventAt)), 'text/csv');
+  toast('CSV downloaded.');
+}
+async function shareBackup(){
+  const txt=JSON.stringify(buildBackup(),null,2);
+  try{
+    const file=new File([txt], backupName('json'), {type:'application/json'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title:'Sprint Repeat Log backup'});
+      state.lastExportAt=Date.now(); await metaSet('lastExportAt', state.lastExportAt);
+      state.dirtySinceExport=false; renderChipbar(); renderSettings();
+      return;
+    }
+  }catch(e){}
+  exportJSON();
+}
+function mergePlan(incoming){
+  const byId={}; state.records.forEach(r=>byId[r.id]=r);
+  const plan={insert:[], update:[], unchanged:0, conflicts:0};
+  (incoming.records||[]).forEach(inc=>{
+    const cur=byId[inc.id];
+    if(!cur){ plan.insert.push(inc); return; }
+    const a=cur.updatedAt||0, b=inc.updatedAt||0;
+    if(b>a) plan.update.push(inc);
+    else if(b===a && (inc.rev||1)>(cur.rev||1)){ plan.update.push(inc); plan.conflicts++; }
+    else plan.unchanged++;
+  });
+  const logIds={}; state.log.forEach(l=>logIds[l.id]=true);
+  plan.logAdd=(incoming.log||[]).filter(l=>!logIds[l.id]);
+  return plan;
+}
+async function importJSONFile(file){
+  let obj;
+  try{ obj=JSON.parse(await file.text()); }
+  catch(e){ toast('That file is not valid JSON.'); return; }
+  if(obj.app && obj.app!==APP.id){ toast('That backup belongs to a different app ('+obj.app+'). Nothing was read.'); return; }
+  if((obj.schemaVersion||1) > APP.schemaVersion){
+    if(!confirm('This backup was written by a newer version of the app (schema '+obj.schemaVersion+'). Import anyway?')) return;
+  }
+  const plan=mergePlan(obj);
+  const h='<h2 style="font-size:19px">Merge backup</h2>'+
+    '<p class="small muted">Nothing is overwritten. For a session that exists on both sides, the newer edit wins.</p>'+
+    '<div class="stats" style="margin:12px 0">'+
+      stat('New', plan.insert.length,'')+stat('Updated', plan.update.length,'')+
+      stat('Unchanged', plan.unchanged,'')+stat('Conflicts', plan.conflicts,'')+
+    '</div>'+
+    '<p class="small muted">'+plan.logAdd.length+' audit entries will be added. A restore point is taken first.</p>'+
+    '<div class="row" style="margin-top:14px"><button class="btn primary" id="mgGo">Apply merge</button>'+
+    '<button class="btn ghost" id="mgNo">Cancel</button></div>';
+  openSheet(h);
+  $('#mgNo').addEventListener('click', ()=>{ closeSheet(); toast('Nothing was written.'); });
+  $('#mgGo').addEventListener('click', async()=>{
+    await takeSnapshot('pre-import');
+    const write=plan.insert.concat(plan.update);
+    await dbBulkPut('records', write);
+    write.forEach(inc=>{ const i=state.records.findIndex(r=>r.id===inc.id); if(i>=0) state.records[i]=inc; else state.records.push(inc); });
+    if(plan.logAdd.length){ await dbBulkPut('log', plan.logAdd); state.log=state.log.concat(plan.logAdd); }
+    await addLog({action:'merge-import', detail:plan.insert.length+' new, '+plan.update.length+' updated, from '+(obj.deviceId||'unknown device')});
+    closeSheet(); renderAll(); renderSettings(); markDirty();
+    toast('Merged. Restore point saved in Settings.');
+  });
+}
+
+/* ---------- snapshots + auto-save ---------- */
+async function takeSnapshot(kind){
+  const snap={ id:uuid(), takenAt:Date.now(), kind:kind||'auto',
+               payload:JSON.stringify(buildBackup()) };
+  await dbPut('backups', snap);
+  const all=(await dbGetAll('backups')).sort((a,b)=>b.takenAt-a.takenAt);
+  const keep={auto:5, 'pre-import':3};
+  const seen={};
+  const drop=[];
+  all.forEach(s=>{
+    const k=s.kind||'auto'; seen[k]=(seen[k]||0)+1;
+    if(seen[k] > (keep[k]||3)) drop.push(s.id);
+  });
+  if(drop.length) await dbBulkDel('backups', drop);
+  state.lastSnapshotAt=snap.takenAt; await metaSet('lastSnapshotAt', state.lastSnapshotAt);
+  return snap;
+}
+let _snapTimer=null;
+function scheduleSnapshot(immediate){
+  if(immediate){ takeSnapshot('auto').catch(()=>{}); return; }
+  if(Date.now()-state.lastSnapshotAt < 10*60*1000) return;
+  clearTimeout(_snapTimer);
+  _snapTimer=setTimeout(()=>{ takeSnapshot('auto').catch(()=>{}); }, 400);
+}
+let _saveTimer=null;
+function markDirty(){
+  state.dirtySinceExport=true;
+  renderChipbar();
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(()=>{ writeAutoSave().catch(()=>{}); }, 800);
+}
+async function writeAutoSave(){
+  if(!state.fileHandle) return false;
+  try{
+    if(state.fileHandle.queryPermission){
+      let p=await state.fileHandle.queryPermission({mode:'readwrite'});
+      if(p!=='granted'){ p=await state.fileHandle.requestPermission({mode:'readwrite'}); }
+      if(p!=='granted') return false;
+    }
+    const w=await state.fileHandle.createWritable();
+    await w.write(JSON.stringify(buildBackup(),null,2));
+    await w.close();
+    state.lastFileWriteAt=Date.now(); await metaSet('lastFileWriteAt', state.lastFileWriteAt);
+    state.dirtySinceExport=false; renderChipbar();
+    if(state.view==='viewSettings') renderSettings();
+    return true;
+  }catch(e){ return false; }
+}
+async function pickAutoSave(){
+  if(!window.showSaveFilePicker){ toast('This browser cannot write files silently. Use Export backup instead.'); return; }
+  try{
+    const h=await window.showSaveFilePicker({
+      suggestedName: backupName('json'),
+      types:[{description:'JSON backup', accept:{'application/json':['.json']}}]
+    });
+    state.fileHandle=h; await metaSet('autoSaveHandle', h);
+    const ok=await writeAutoSave();
+    toast(ok?'Auto-save set. The file updates on every change.':'File chosen but the first write failed.');
+    renderSettings();
+  }catch(e){ /* user cancelled */ }
+}
+
+/* ---------- chipbar (nags) ---------- */
+function renderChipbar(){
+  const bar=$('#chipbar'); if(!bar) return;
+  let h='';
+  const days = state.lastExportAt ? Math.floor((Date.now()-state.lastExportAt)/86400000) : null;
+  const androidish = !window.showSaveFilePicker;
+  if(androidish && state.dirtySinceExport){
+    h+='<button class="nagchip" data-act="export">⤓ Export backup — changes not in a file yet</button>';
+  }else if(days===null && liveSessions().length){
+    h+='<button class="nagchip" data-act="export">⤓ No backup taken yet</button>';
+  }else if(days!==null && days>=7){
+    h+='<button class="nagchip" data-act="export">⤓ Last backup '+days+' days ago</button>';
+  }
+  bar.innerHTML=h;
+  bar.querySelectorAll('.nagchip').forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.act==='export') shareBackup(); }));
+  $('#btnExportChip').hidden = !state.dirtySinceExport;
+}
+
+/* ============================================================
+   REPORT
+   ============================================================ */
+function reportFilter(){
+  return { from:$('#rFrom').value, to:$('#rTo').value, slot:$('#rSlot').value, surface:$('#rSurface').value, text:'' };
+}
+function buildReport(){
+  const f=reportFilter();
+  const list=filteredSessions(f).slice().sort((a,b)=>sessionMetrics(a).eventAt-sessionMetrics(b).eventAt);
+  const opt={ chart:$('#rChart').checked, notes:$('#rNotes').checked, audit:$('#rAudit').checked, sign:$('#rSign').checked };
+  const html=reportHTML(list, f, opt);
+  $('#reportPreview').innerHTML=html;
+  $('#printHost').innerHTML='<div class="rpt">'+html+'</div>';
+  const orient=$('#rOrient').value, paper=$('#rPaper').value;
+  let ps=document.getElementById('pageStyle');
+  if(!ps){ ps=document.createElement('style'); ps.id='pageStyle'; document.head.appendChild(ps); }
+  ps.textContent='@page{ size:'+paper+' '+orient+'; margin:14mm 12mm; }';
+  state.settings.orient=orient; state.settings.paper=paper; saveSettings();
+}
+function reportHTML(list, f, opt){
+  const ms=list.map(sessionMetrics);
+  const fades=ms.map(m=>m.fade).filter(v=>v!=null);
+  const totalD=ms.reduce((a,m)=>a+m.totalD,0);
+  const totalT=ms.reduce((a,m)=>a+m.totalT,0);
+  const best=ms.length?Math.max.apply(null,ms.map(m=>m.best)):0;
+  const avgFade=fades.length?(fades.reduce((a,b)=>a+b,0)/fades.length):null;
+  const bestFade=fades.length?Math.min.apply(null,fades):null;
+  const range=(f.from||'start')+'  to  '+(f.to||'today');
+  const who=(state.settings.athlete||'').trim();
+
+  let h='<div class="rhead">';
+  h+='<h1>Repeat-Sprint Training Report</h1>';
+  h+='<div class="sub">Fixed-effort repeats with timed recovery · fade measured between first and last rep</div>';
+  h+='<div class="meta"><span><b>Athlete:</b> '+esc(who||'—')+'</span>'+
+     '<span><b>Period:</b> '+esc(range)+'</span>'+
+     '<span><b>Session filter:</b> '+esc(f.slot||'all')+'</span>'+
+     '<span><b>Surface:</b> '+esc(f.surface||'all')+'</span>'+
+     '<span><b>Generated:</b> '+esc(fmtAbs(Date.now()))+'</span></div></div>';
+
+  if(!list.length){
+    h+='<p>No sessions fall inside this period.</p>';
+    return h;
+  }
+
+  h+='<h2>Summary</h2><div class="sumgrid">'+
+      '<div class="sumbox"><div class="k">Sessions</div><div class="v">'+list.length+'</div></div>'+
+      '<div class="sumbox"><div class="k">Total distance</div><div class="v">'+(totalD/1000).toFixed(2)+' km</div></div>'+
+      '<div class="sumbox"><div class="k">Average fade</div><div class="v">'+(avgFade==null?'—':avgFade.toFixed(1)+'%')+'</div></div>'+
+      '<div class="sumbox"><div class="k">Best fade</div><div class="v">'+(bestFade==null?'—':bestFade.toFixed(1)+'%')+'</div></div>'+
+      '<div class="sumbox"><div class="k">Running time</div><div class="v">'+mmss(totalT)+'</div></div>'+
+      '<div class="sumbox"><div class="k">Best speed</div><div class="v">'+(best?best.toFixed(2):'—')+' m/s</div></div>'+
+      '<div class="sumbox"><div class="k">Morning</div><div class="v">'+list.filter(r=>r.data.slot==='Morning').length+'</div></div>'+
+      '<div class="sumbox"><div class="k">Evening</div><div class="v">'+list.filter(r=>r.data.slot==='Evening').length+'</div></div>'+
+    '</div>';
+
+  if(opt.chart && list.length>1){
+    const labels=ms.map(m=>shortDate(m.eventAt));
+    h+='<h2>Progression</h2>'+
+      lineChartSVG([
+        {values:ms.map(m=>m.m[0]?m.m[0].kmh:null)},
+        {values:ms.map(m=>m.m.length>1?m.m[m.m.length-1].kmh:null)}
+      ], labels, v=>v.toFixed(1), 'km/h')+
+      '<div style="font-size:8.5pt;color:#333">Solid dark line: first rep. Second line: last rep. The gap between them is the fade.</div>';
+  }
+
+  h+='<h2>Sessions</h2><table><thead><tr>'+
+     '<th>Date</th><th>Session</th><th>Surface</th>'+
+     '<th class="n">R1 m</th><th class="n">R1 s</th><th class="n">R1 km/h</th>'+
+     '<th class="n">R2 m</th><th class="n">R2 s</th><th class="n">R2 km/h</th>'+
+     '<th class="n">Rest s</th><th class="n">Fade</th><th class="n">RPE</th><th class="n">Peak HR</th>'+
+     (opt.notes?'<th>Notes</th>':'')+'</tr></thead><tbody>';
+  list.forEach((rec,i)=>{
+    const m=ms[i], d=rec.data;
+    const r1=m.reps[0], r2=m.reps[1];
+    h+='<tr>'+
+      '<td>'+esc(d.date)+'</td><td>'+esc(d.slot)+'</td><td>'+esc(d.surface||'')+'</td>'+
+      '<td class="n">'+(r1?r1.d:'')+'</td><td class="n">'+(r1?r1.t:'')+'</td><td class="n">'+(m.m[0]?m.m[0].kmh.toFixed(2):'')+'</td>'+
+      '<td class="n">'+(r2?r2.d:'')+'</td><td class="n">'+(r2?r2.t:'')+'</td><td class="n">'+(m.m[1]?m.m[1].kmh.toFixed(2):'')+'</td>'+
+      '<td class="n">'+(d.restSec!=null?d.restSec:'')+'</td>'+
+      '<td class="n">'+(m.fade==null?'':(m.fade>0?'-':'+')+Math.abs(m.fade).toFixed(1)+'%')+'</td>'+
+      '<td class="n">'+(d.rpe!=null?d.rpe:'')+'</td><td class="n">'+(d.hrPeak!=null?d.hrPeak:'')+'</td>'+
+      (opt.notes?'<td>'+esc(d.notes||'')+'</td>':'')+
+    '</tr>';
+    if(m.reps.length>2){
+      h+='<tr><td></td><td colspan="'+(opt.notes?13:12)+'" style="font-size:8pt">Further reps: '+
+         m.reps.slice(2).map((r,k)=>'R'+(k+3)+' '+r.d+' m / '+r.t+' s ('+(r.d/r.t*3.6).toFixed(2)+' km/h)').join(' · ')+'</td></tr>';
+    }
+  });
+  h+='</tbody></table>';
+  h+='<div style="font-size:8.5pt;color:#333;margin-top:3mm">Fade is the drop in speed from the first rep to the last, as a percentage of the first rep. A minus figure means the later rep was slower. Speed is distance divided by time.</div>';
+
+  if(opt.audit){
+    const from=f.from?new Date(f.from+'T00:00:00').getTime():0;
+    const to=f.to?new Date(f.to+'T23:59:59').getTime():Date.now();
+    const entries=state.log.filter(l=>l.ts>=from && l.ts<=to).sort((a,b)=>a.ts-b.ts);
+    h+='<div class="page-break"></div><h2>Audit trail</h2>';
+    if(!entries.length) h+='<p style="font-size:9pt">No entries recorded in this period.</p>';
+    else{
+      h+='<table><thead><tr><th>When</th><th>Action</th><th>Source</th><th>Detail</th><th>Device</th></tr></thead><tbody>';
+      entries.forEach(e=>{
+        h+='<tr><td>'+esc(fmtAbs(e.ts))+'</td><td>'+esc(e.action)+'</td><td>'+esc(e.source||'manual')+'</td>'+
+           '<td>'+esc(e.detail||'')+'</td><td>'+esc(e.deviceId||'')+'</td></tr>';
+      });
+      h+='</tbody></table>';
+    }
+  }
+
+  if(opt.sign){
+    h+='<div class="sign"><div>Signature</div><div>Name and rank</div><div>Date</div></div>';
+  }
+  h+='<div class="foot"><span>'+esc(APP.name)+' v'+APP.version+' · device '+esc(state.deviceId)+'</span>'+
+     '<span>'+list.length+' session(s) · generated '+esc(isoDT(Date.now()))+'</span></div>';
+  return h;
+}
+
+/* ============================================================
+   SETTINGS
+   ============================================================ */
+async function saveSettings(){ await metaSet('settings', state.settings); }
+async function renderSettings(){
+  const st=$('#storageStatus');
+  const fs = window.showSaveFilePicker ? (state.fileHandle ? (state.fileHandle.name||'configured') : 'not configured') : 'not available in this browser';
+  st.innerHTML =
+    '<div class="spread"><span class="muted">Persistent storage</span><b>'+(state.persisted?'Granted':'Not granted')+'</b></div>'+
+    '<div class="spread"><span class="muted">Auto-save file</span><b>'+esc(fs)+'</b></div>'+
+    '<div class="spread"><span class="muted">Last file write</span><b>'+(state.lastFileWriteAt?esc(fmtAbs(state.lastFileWriteAt)):'—')+'</b></div>'+
+    '<div class="spread"><span class="muted">Sessions stored</span><b>'+liveSessions().length+'</b></div>'+
+    '<div class="spread"><span class="muted">Audit entries</span><b>'+state.log.length+'</b></div>';
+
+  $('#backupStatus').innerHTML =
+    'Last export: '+(state.lastExportAt? esc(fmtRel(state.lastExportAt))+' ('+esc(fmtAbs(state.lastExportAt))+')' : 'never')+
+    (state.dirtySinceExport? ' — there are changes since then.' : '');
+
+  const snaps=(await dbGetAll('backups')).sort((a,b)=>b.takenAt-a.takenAt);
+  let h='<div class="spread"><span class="muted">Last snapshot</span><b>'+(state.lastSnapshotAt?esc(fmtRel(state.lastSnapshotAt)):'—')+'</b></div>'+
+        '<div class="spread"><span class="muted">Snapshots held</span><b>'+snaps.length+'</b></div><hr class="sep">';
+  if(!snaps.length) h+='<p class="muted small" style="margin:0">No snapshots yet.</p>';
+  snaps.forEach(s=>{
+    h+='<div class="spread" style="margin-bottom:8px"><span class="small">'+esc(fmtAbs(s.takenAt))+' · '+esc(s.kind)+'</span>'+
+       '<button class="btn ghost" data-snap="'+s.id+'" style="min-height:36px;padding:6px 12px">Restore</button></div>';
+  });
+  const batches=state.log.filter(l=>l.action==='import').sort((a,b)=>b.ts-a.ts).slice(0,5);
+  if(batches.length){
+    h+='<hr class="sep"><p class="small muted" style="margin:0 0 8px">Recent imports</p>';
+    batches.forEach(b=>{
+      const undone=state.log.some(l=>l.action==='undo-import' && l.batchId===b.batchId);
+      h+='<div class="spread" style="margin-bottom:8px"><span class="small">'+esc(fmtAbs(b.ts))+' · '+esc(b.detail||'')+(undone?' · undone':'')+'</span>'+
+         (undone?'':'<button class="btn ghost" data-undo="'+b.batchId+'" style="min-height:36px;padding:6px 12px">Undo import</button>')+'</div>';
+    });
+  }
+  $('#snapList').innerHTML=h;
+  $('#snapList').querySelectorAll('[data-snap]').forEach(b=>b.addEventListener('click',()=>restoreSnapshot(b.dataset.snap)));
+  $('#snapList').querySelectorAll('[data-undo]').forEach(b=>b.addEventListener('click',()=>undoBatch(b.dataset.undo)));
+
+  $('#aboutText').innerHTML =
+    '<div class="spread"><span class="muted">Version</span><b>'+APP.version+'</b></div>'+
+    '<div class="spread"><span class="muted">Schema</span><b>'+APP.schemaVersion+'</b></div>'+
+    '<div class="spread"><span class="muted">Device</span><b>'+esc(state.deviceId)+'</b></div>'+
+    '<hr class="sep"><p class="muted" style="margin:0"><b>What\'s new</b><br>'+WHATS_NEW.map(esc).join('<br>')+'</p>';
+}
+async function restoreSnapshot(id){
+  const s=await dbGet('backups', id); if(!s) return;
+  if(!confirm('Restore this snapshot? It is merged in the same way as a backup file — nothing currently on this device is deleted.')) return;
+  let obj; try{ obj=JSON.parse(s.payload); }catch(e){ toast('That snapshot is unreadable.'); return; }
+  const plan=mergePlan(obj);
+  const write=plan.insert.concat(plan.update);
+  await dbBulkPut('records', write);
+  write.forEach(inc=>{ const i=state.records.findIndex(r=>r.id===inc.id); if(i>=0) state.records[i]=inc; else state.records.push(inc); });
+  if(plan.logAdd.length){ await dbBulkPut('log', plan.logAdd); state.log=state.log.concat(plan.logAdd); }
+  await addLog({action:'restore-snapshot', detail:plan.insert.length+' restored, '+plan.update.length+' updated'});
+  renderAll(); renderSettings(); markDirty();
+  toast('Snapshot merged back in.');
+}
+
+/* ============================================================
+   RENDER ALL
+   ============================================================ */
+function renderAll(){
+  renderRecent();
+  renderChipbar();
+  if(state.view==='viewHistory') renderHistory();
+  if(state.view==='viewCharts') renderCharts();
+  if(state.view==='viewReport') buildReport();
+}
+
+/* ============================================================
+   EVENTS
+   ============================================================ */
+function wireEvents(){
+  /* nav */
+  $$('#nav button').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.view)));
+  $('#btnSettings').addEventListener('click',()=>setView('viewSettings'));
+  history.replaceState({view:'viewLog'},'','');
+  window.addEventListener('popstate', function(e){
+    if(isSheetOpen()){ closeSheet(); return; }
+    const v=(e.state && e.state.view) ? e.state.view : 'viewLog';
+    if(state.view!=='viewLog' && v==='viewLog'){ setView('viewLog', false); return; }
+    setView(v, false);
+  });
+  $('#scrim').addEventListener('click',()=>{ closeSheet(); history.back(); });
+
+  /* log form */
+  $('#segSlot').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) setSlot(b.dataset.slot); });
+  $('#btnAddRep').addEventListener('click',()=>{
+    if(state.repCount>=MAX_REPS){ toast('Four reps is the limit — that is what the report and the template carry.'); return; }
+    const cur=readReps(); state.repCount++; renderRepRows(cur);
+  });
+  $('#btnDelRep').addEventListener('click',()=>{
+    if(state.repCount<=1) return;
+    const cur=readReps(); state.repCount--; renderRepRows(cur);
+  });
+  $('#btnSave').addEventListener('click', saveSession);
+  $('#btnClearForm').addEventListener('click', ()=>{ resetForm(); toast('Form cleared.'); });
+  $('#btnCancelEdit').addEventListener('click', ()=>{ resetForm(); toast('Edit cancelled.'); });
+
+  /* timer */
+  $('#segMode').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    $$('#segMode button').forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+    updateModeHelp();
+  });
+  $('#btnTimerStart').addEventListener('click', timerStart);
+  $('#btnTimerStop').addEventListener('click', timerStop);
+  $('#btnTimerLap').addEventListener('click', timerLap);
+
+  /* history */
+  ['#hFrom','#hTo','#hSlot','#hSurface','#hText'].forEach(s=>$(s).addEventListener('input', renderHistory));
+  $('#hReset').addEventListener('click',()=>{
+    $('#hFrom').value=''; $('#hTo').value=''; $('#hSlot').value=''; $('#hSurface').value=''; $('#hText').value='';
+    renderHistory();
+  });
+  $('#hCopyAI').addEventListener('click', async()=>{
+    const list=filteredSessions(historyFilter());
+    if(!list.length){ toast('Nothing visible to copy.'); return; }
+    const ok=await copyText(recordsToTSV(list));
+    toast(ok? list.length+' rows copied — ids included, so pasting back updates them.' : 'Copy failed.');
+  });
+
+  /* charts */
+  $('#segRange').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    $$('#segRange button').forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+    state.chartDays=Number(b.dataset.days); renderCharts();
+  });
+  $('#segSplit').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    $$('#segSplit button').forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+    state.chartSplit=b.dataset.split==='1'; renderCharts();
+  });
+
+  /* report */
+  ['#rFrom','#rTo','#rSlot','#rSurface','#rChart','#rNotes','#rAudit','#rSign','#rOrient','#rPaper']
+    .forEach(s=>$(s).addEventListener('change', buildReport));
+  $('#segRPreset').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    const d=Number(b.dataset.days);
+    if(d===0){ $('#rFrom').value=''; $('#rTo').value=''; }
+    else{ $('#rTo').value=todayISO(); $('#rFrom').value=todayISO(Date.now()-d*86400000); }
+    buildReport();
+  });
+  $('#btnBuildReport').addEventListener('click', ()=>{ buildReport(); toast('Preview updated.'); });
+  $('#btnPrint').addEventListener('click', ()=>{ buildReport(); setTimeout(()=>window.print(), 120); });
+
+  /* import */
+  $('#btnParsePaste').addEventListener('click',()=>{
+    const res=detectAndParse($('#pasteBox').value);
+    if(res.kind==='empty'){ toast('Paste something first.'); return; }
+    if(res.kind==='error'){ toast(res.message); return; }
+    state.importSource='paste';
+    if(res.kind==='json') stageJSON(res.rows); else stageTable(res.rows);
+  });
+  $('#btnClearPaste').addEventListener('click',()=>{ $('#pasteBox').value=''; state.importRows=null; renderImportStage(); });
+  $('#btnTemplate').addEventListener('click',()=>{ download(APP.id+'-template.csv', templateCSV(), 'text/csv'); toast('Template downloaded.'); });
+  $('#btnPickCsv').addEventListener('click',()=>$('#fileCsv').click());
+  $('#fileCsv').addEventListener('change', async e=>{
+    const f=e.target.files[0]; if(!f) return;
+    const txt=await f.text(); state.importSource='file';
+    const res=detectAndParse(txt);
+    if(res.kind==='error'){ toast(res.message); }
+    else if(res.kind==='json') stageJSON(res.rows);
+    else stageTable(res.rows);
+    e.target.value='';
+  });
+  $('#btnCopySchema').addEventListener('click', async()=>{
+    const ok=await copyText(aiSchemaText());
+    toast(ok?'Schema copied — paste it into your dictation project.':'Copy failed.');
+  });
+
+  /* settings */
+  $('#segTheme').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    state.settings.theme=b.dataset.theme; saveSettings(); applyTheme(b.dataset.theme);
+  });
+  $('#sAthlete').addEventListener('change',()=>{ state.settings.athlete=$('#sAthlete').value.trim(); saveSettings(); });
+  $('#sRest').addEventListener('change',()=>{ state.settings.defRest=num($('#sRest').value)||180; saveSettings(); $('#tRest').value=state.settings.defRest; });
+  $('#sRun').addEventListener('change',()=>{ state.settings.defRun=num($('#sRun').value)||60; saveSettings(); $('#tRun').value=state.settings.defRun; });
+  $('#sDist').addEventListener('change',()=>{ state.settings.defDist=num($('#sDist').value)||200; saveSettings(); });
+  $('#sSurface').addEventListener('change',()=>{ state.settings.defSurface=$('#sSurface').value; saveSettings(); });
+  $('#sSound').addEventListener('change',()=>{ state.settings.sound=$('#sSound').value==='1'?1:0; saveSettings(); });
+  $('#btnPersist').addEventListener('click', async()=>{
+    if(!navigator.storage || !navigator.storage.persist){ toast('This browser does not offer persistent storage.'); return; }
+    state.persisted=await navigator.storage.persist();
+    renderSettings();
+    toast(state.persisted?'Granted — Android will not evict the database under storage pressure.':'Chrome declined for now. Install the app or use it more and try again.');
+  });
+  $('#btnPickAutoSave').addEventListener('click', pickAutoSave);
+  $('#btnClearAutoSave').addEventListener('click', async()=>{ state.fileHandle=null; await metaSet('autoSaveHandle', null); renderSettings(); toast('Auto-save cleared.'); });
+  $('#btnExportJson').addEventListener('click', exportJSON);
+  $('#btnExportCsv').addEventListener('click', exportCSV);
+  $('#btnShare').addEventListener('click', shareBackup);
+  $('#btnImportJson').addEventListener('click',()=>$('#fileJson').click());
+  $('#fileJson').addEventListener('change', async e=>{ const f=e.target.files[0]; if(f) await importJSONFile(f); e.target.value=''; });
+  $('#btnExportChip').addEventListener('click', shareBackup);
+
+  /* lifecycle */
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='hidden'){
+      scheduleSnapshot(false);
+      writeAutoSave().catch(()=>{});
+    }
+  });
+  window.addEventListener('beforeunload', function(e){
+    const desktop = !!window.showSaveFilePicker;
+    if(desktop && !state.fileHandle && state.dirtySinceExport){
+      e.preventDefault(); e.returnValue='';
+    }
+  });
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault(); state.installPrompt=e; $('#btnInstall').hidden=false;
+  });
+  $('#btnInstall').addEventListener('click', async()=>{
+    if(!state.installPrompt) return;
+    state.installPrompt.prompt(); await state.installPrompt.userChoice;
+    state.installPrompt=null; $('#btnInstall').hidden=true;
+  });
+}
+
+/* Service worker — only over http(s); from file:// it is simply skipped. */
+if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js', {scope:'./'}).then(function(reg){
+      reg.addEventListener('updatefound', function(){
+        const w=reg.installing; if(!w) return;
+        w.addEventListener('statechange', function(){
+          if(w.state==='installed' && navigator.serviceWorker.controller){
+            toast('A new version is ready. Close the app and open it again to switch over.', 6000);
+          }
+        });
+      });
+    }).catch(function(){});
+  });
+}
+
+boot().catch(err=>{
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="padding:16px;color:#ff8a80;font-family:system-ui">Could not start: '+esc(err && err.message ? err.message : String(err))+
+    '<br><br>If this browser blocks IndexedDB (private window, or storage disabled), the app cannot save anything. Open it in a normal window.</div>');
+});
+</script>
+</body>
+</html>
