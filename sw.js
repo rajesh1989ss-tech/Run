@@ -1,12 +1,13 @@
 /* Sprint Repeat Log — offline shell.
    Cache-first for the app's own files, network for anything else.
    Bump CACHE when you change index.html or the icons, or the old copy keeps serving. */
-const CACHE = 'sprintlog-v1.1.0';
+const CACHE = 'sprintlog-v1.2.0';
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
   './logo.svg',
+  './logo-jnr.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-192.png',

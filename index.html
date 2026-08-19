@@ -98,11 +98,7 @@ header.top{
   display:flex; align-items:center; gap:10px;
 }
 header.top .brand{flex:1; min-width:0}
-.logomark{flex:0 0 36px; width:36px; height:36px; display:block}
-.logomark .steel{stroke:var(--text)}
-.logomark .steelf{fill:var(--text)}
-.logomark .speed{stroke:var(--accent)}
-.logomark .ring{stroke:var(--muted)}
+.logomark{flex:0 0 auto; width:44px; height:32px; display:block; object-fit:contain}
 header.top .brand b{display:block; font-size:16px; letter-spacing:.2px}
 header.top .brand small{display:block; color:var(--muted); font-size:11.5px; letter-spacing:.06em; text-transform:uppercase}
 .iconbtn{
@@ -316,7 +312,7 @@ nav.bottom button[aria-current="page"]{color:var(--accent); font-weight:700}
 <body>
 
 <header class="top">
-  <svg class="logomark" viewBox="0 0 64 64" aria-hidden="true" focusable="false" fill="none" stroke-linecap="round" stroke-linejoin="round"><path class="ring" d="M 21 7 A 27 27 0 0 0 21 57" stroke-width="2.8"/><path class="speed" d="M 43 5.9 A 27 27 0 0 1 43 58.1" stroke-width="2.8"/><g class="speed" stroke-width="2.8"><path d="M 2.5 22 H 15"/><path d="M 5.5 29.5 H 13.5"/><path d="M 8.5 37 H 14"/></g><g class="steel"><path d="M 39.2 23.4 L 26.6 35.8" stroke-width="6.2"/><path d="M 41.4 20.4 L 39.4 23.2" stroke-width="4.4"/><path d="M 37.6 25 L 29.4 20 L 22.4 22.6" stroke-width="4.8"/><path d="M 39.6 24.8 L 47 29.6 L 44.4 35.6" stroke-width="4.8"/><path d="M 27.2 36 L 36.8 38.8 L 34 46.8" stroke-width="5.4"/><path d="M 34.2 47 L 39.4 48.2" stroke-width="4"/><path d="M 26.4 36.4 L 18.6 44.6 L 22.6 52" stroke-width="5.4"/><path d="M 22.4 52.2 L 19 55.2" stroke-width="4"/></g><circle class="steelf" cx="43.4" cy="17.4" r="5"/><path class="ring" d="M 15.5 57.5 Q 32 61.5 48.5 55.5" stroke-width="2.2"/></svg>
+  <img class="logomark" src="logo-jnr.png" width="44" height="32" alt="" aria-hidden="true" decoding="async">
   <div class="brand">
     <b>Sprint Repeat Log</b>
     <small id="brandSub">60 s · rest · 60 s</small>
