@@ -46,12 +46,13 @@ The `.nojekyll` file stops GitHub from reprocessing the site. Leave it there.
 | `manifest.webmanifest` | Name, icons and `"id": "./"` so installs don't collide with other apps on the same Pages account |
 | `sw.js` | Service worker. Caches the shell so the app opens offline, and is what makes Chrome offer a real install |
 | `icons/` | 192 and 512 px icons, plus maskable versions that survive Android's circular crop |
-| `logo.svg` | Vector mark, adapts to light and dark |
+| `logo.svg` | Full-size JNR brand mark, self-contained for linking elsewhere |
+| `logo-jnr.png` | The same mark, sized for the app header |
 | `.nojekyll` | Tells GitHub Pages to serve the files as they are |
 
 ### After you change `index.html`
 
-Bump the `CACHE` constant at the top of `sw.js` (for example `sprintlog-v1.1.1`) and push both files.
+Bump the `CACHE` constant at the top of `sw.js` (for example `sprintlog-v1.2.1`) and push both files.
 Without the bump, the old cached copy keeps being served and your change never appears.
 
 ## Running it without GitHub
